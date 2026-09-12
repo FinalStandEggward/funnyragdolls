@@ -1,52 +1,28 @@
+--==================================================
+-- FURNACE EFFECT
+--==================================================
+
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
-local Config = _G.RagdollConfig
 
-if not Config then
-    warn("RagdollConfig was not initialized.")
-    return
-end
+return function(ragdoll, CONFIG)
 
-local RagdollFolder = Workspace:WaitForChild("Ragdolls")
-
-local FURNACE_DISTANCE = Config.FURNACE_DISTANCE
-local FURNACE_SIZE = Config.FURNACE_SIZE
-local FURNACE_PULL_DELAY = Config.FURNACE_PULL_DELAY
-local FURNACE_PULL_SPEED = Config.FURNACE_PULL_SPEED
-local FURNACE_PULL_DURATION = Config.FURNACE_PULL_DURATION
-local FURNACE_IMPACT_DELAY = Config.FURNACE_IMPACT_DELAY
-local FURNACE_ENTRY_FLING_SPEED = Config.FURNACE_ENTRY_FLING_SPEED
-local FURNACE_ENTRY_FLING_TIME = Config.FURNACE_ENTRY_FLING_TIME
-local FURNACE_ENTRY_SPIN = Config.FURNACE_ENTRY_SPIN
-local FURNACE_COMPACT_SCALE = Config.FURNACE_COMPACT_SCALE
-local FURNACE_DING_DELAY = Config.FURNACE_DING_DELAY
-local FURNACE_LOOF_ASSET = Config.FURNACE_LOOF_ASSET
-local FURNACE_COOK_TIME = Config.FURNACE_COOK_TIME
-local FURNACE_EXIT_SPEED = Config.FURNACE_EXIT_SPEED
-local FURNACE_EXIT_UPWARD = Config.FURNACE_EXIT_UPWARD
-local FURNACE_EXIT_DISTANCE = Config.FURNACE_EXIT_DISTANCE
-local FURNACE_FADE_TIME = Config.FURNACE_FADE_TIME
-local FURNACE_FIRE_PARTICLE_RATE = Config.FURNACE_FIRE_PARTICLE_RATE
-local FURNACE_FIRE_TEXTURE = Config.FURNACE_FIRE_TEXTURE
-local FURNACE_SMOKE_TEXTURE = Config.FURNACE_SMOKE_TEXTURE
-local FURNACE_THUD_SOUND = Config.FURNACE_THUD_SOUND
-
-local function furnaceRagdollEffect(ragdoll)
     if not ragdoll
         or not ragdoll.Parent
-        or not ragdoll:IsA("Model")
-    then
+        or not ragdoll:IsA("Model") then
         return
     end
 
-    -- Get ragdoll parts
+
+    --==================================================
+    -- GET RAGDOLL PARTS / CENTER
+    --==================================================
+
     local ragdollParts = {}
 
-    for _, obj in ipairs(
-        ragdoll:GetDescendants()
-    ) do
+    for _, obj in ipairs(ragdoll:GetDescendants()) do
         if obj:IsA("BasePart") then
             table.insert(ragdollParts, obj)
         end
@@ -64,155 +40,157 @@ local function furnaceRagdollEffect(ragdoll)
 
     center /= #ragdollParts
 
-    -- Random furnace position
-    local angle =
-        math.random() * math.pi * 2
 
-    local direction =
-        Vector3.new(
-            math.cos(angle),
-            0,
-            math.sin(angle)
-        ).Unit
+    --==================================================
+    -- RANDOM FURNACE POSITION
+    --==================================================
+
+    local angle = math.random() * math.pi * 2
+
+    local direction = Vector3.new(
+        math.cos(angle),
+        0,
+        math.sin(angle)
+    ).Unit
 
     local furnacePosition =
+        center + direction * CONFIG.FURNACE_DISTANCE
+
+    local furnaceCFrame = CFrame.lookAt(
+        furnacePosition,
         center
-        + direction * FURNACE_DISTANCE
+    )
 
-    local furnaceCFrame =
-        CFrame.lookAt(
-            furnacePosition,
-            center
-        )
 
-    -- Create furnace
-    local furnace =
-        Instance.new("Part")
+    --==================================================
+    -- CREATE FURNACE
+    --==================================================
+
+    local furnace = Instance.new("Part")
 
     furnace.Name = "RagdollFurnace"
-    furnace.Size = FURNACE_SIZE
+    furnace.Size = CONFIG.FURNACE_SIZE
     furnace.CFrame = furnaceCFrame
+
     furnace.Anchored = true
     furnace.CanCollide = false
     furnace.CanTouch = false
     furnace.CanQuery = true
+
     furnace.Material = Enum.Material.Metal
     furnace.Transparency = 0
+
     furnace.Parent = Workspace
 
-    -- Decals
+
+    --==================================================
+    -- FURNACE DECALS
+    --==================================================
+
     local function addDecal(face, textureId)
-        local decal =
-            Instance.new("Decal")
 
-        decal.Name =
-            face.Name .. "Decal"
+        local decal = Instance.new("Decal")
 
+        decal.Name = face.Name .. "Decal"
         decal.Face = face
-        decal.Texture =
-            "rbxassetid://" .. textureId
-
+        decal.Texture = "rbxassetid://" .. textureId
         decal.Transparency = 0
+
         decal.Parent = furnace
 
         return decal
     end
 
-    addDecal(
+
+    local frontDecal = addDecal(
         Enum.NormalId.Front,
         "87665103173374"
     )
 
-    addDecal(
-        Enum.NormalId.Back,
-        "7331076496"
-    )
+    addDecal(Enum.NormalId.Back, "7331076496")
+    addDecal(Enum.NormalId.Left, "7331076496")
+    addDecal(Enum.NormalId.Right, "7331076496")
 
-    addDecal(
-        Enum.NormalId.Left,
-        "7331076496"
-    )
+    addDecal(Enum.NormalId.Top, "7348486479")
+    addDecal(Enum.NormalId.Bottom, "7348486479")
 
-    addDecal(
-        Enum.NormalId.Right,
-        "7331076496"
-    )
-
-    addDecal(
-        Enum.NormalId.Top,
-        "7348486479"
-    )
-
-    addDecal(
-        Enum.NormalId.Bottom,
-        "7348486479"
-    )
 
     local function setFrontTexture(textureId)
+
         if not furnace.Parent then
             return
         end
 
-        for _, obj in ipairs(
-            furnace:GetChildren()
-        ) do
+        for _, obj in ipairs(furnace:GetChildren()) do
             if obj:IsA("Decal")
-                and obj.Face == Enum.NormalId.Front
-            then
+                and obj.Face == Enum.NormalId.Front then
+
                 obj:Destroy()
             end
         end
 
-        local newFront =
-            Instance.new("Decal")
+        local newFront = Instance.new("Decal")
 
         newFront.Name = "FrontDecal"
         newFront.Face = Enum.NormalId.Front
-        newFront.Texture =
-            "rbxassetid://" .. tostring(textureId)
+        newFront.Texture = "rbxassetid://" .. tostring(textureId)
+
         newFront.Transparency = 0
         newFront.ZIndex = 10
+
         newFront.Parent = furnace
+
+        frontDecal = newFront
     end
 
-    -- Sounds
-    local furnaceSound1 =
-        Instance.new("Sound")
+
+    --==================================================
+    -- SOUNDS
+    --==================================================
+
+    local furnaceSound1 = Instance.new("Sound")
 
     furnaceSound1.Name = "FurnaceSound1"
 
-    local loofAsset = nil
+    local loofAsset
 
     pcall(function()
-        loofAsset =
-            getcustomasset(FURNACE_LOOF_ASSET)
+        if getcustomasset then
+            loofAsset = getcustomasset(
+                CONFIG.FURNACE_LOOF_ASSET
+            )
+        end
     end)
 
     furnaceSound1.SoundId =
-        loofAsset
-        or "rbxassetid://5418867840"
+        loofAsset or "rbxassetid://5418867840"
 
     furnaceSound1.Volume = 1
     furnaceSound1.Looped = false
+
     furnaceSound1.Parent = furnace
 
-    local furnaceSound2 =
-        Instance.new("Sound")
+
+    local furnaceSound2 = Instance.new("Sound")
 
     furnaceSound2.Name = "FurnaceSound2"
-    furnaceSound2.SoundId =
-        "rbxassetid://158853971"
+    furnaceSound2.SoundId = "rbxassetid://158853971"
 
     furnaceSound2.Volume = 1
     furnaceSound2.Looped = true
+
     furnaceSound2.Parent = furnace
 
-    -- Allow ragdoll to exist normally first
-    task.wait(FURNACE_PULL_DELAY)
+
+    --==================================================
+    -- WAIT
+    --==================================================
+
+    task.wait(CONFIG.FURNACE_PULL_DELAY)
 
     if not furnace.Parent
-        or not ragdoll.Parent
-    then
+        or not ragdoll.Parent then
+
         if furnace.Parent then
             furnace:Destroy()
         end
@@ -220,19 +198,19 @@ local function furnaceRagdollEffect(ragdoll)
         return
     end
 
-    -- Refresh parts
+
+    --==================================================
+    -- REFRESH PARTS
+    --==================================================
+
     ragdollParts = {}
 
-    for _, obj in ipairs(
-        ragdoll:GetDescendants()
-    ) do
+    for _, obj in ipairs(ragdoll:GetDescendants()) do
         if obj:IsA("BasePart") then
-            table.insert(
-                ragdollParts,
-                obj
-            )
+            table.insert(ragdollParts, obj)
         end
     end
+
 
     local currentCenter = Vector3.zero
 
@@ -247,23 +225,25 @@ local function furnaceRagdollEffect(ragdoll)
         return
     end
 
-    local currentPivot =
-        ragdoll:GetPivot()
+
+    --==================================================
+    -- ENTRY
+    --==================================================
+
+    local currentPivot = ragdoll:GetPivot()
 
     local entryDistance =
-        (FURNACE_SIZE.Z / 2) + 0.7
+        (CONFIG.FURNACE_SIZE.Z / 2) + 0.7
 
     local insideDistance = -0.65
 
     local entryPosition =
         furnace.Position
-        + furnace.CFrame.LookVector
-        * entryDistance
+        + furnace.CFrame.LookVector * entryDistance
 
     local insidePosition =
         furnace.Position
-        + furnace.CFrame.LookVector
-        * insideDistance
+        + furnace.CFrame.LookVector * insideDistance
 
     local entryCFrame =
         CFrame.new(entryPosition)
@@ -273,9 +253,11 @@ local function furnaceRagdollEffect(ragdoll)
         CFrame.new(insidePosition)
         * currentPivot.Rotation
 
-    -- Disable collisions
+
     for _, part in ipairs(ragdollParts) do
+
         if part.Parent then
+
             part.CanCollide = false
             part.CanTouch = false
             part.CanQuery = false
@@ -283,50 +265,49 @@ local function furnaceRagdollEffect(ragdoll)
             part.AssemblyAngularVelocity =
                 Vector3.new(
                     math.random(
-                        -FURNACE_ENTRY_SPIN,
-                        FURNACE_ENTRY_SPIN
+                        -CONFIG.FURNACE_ENTRY_SPIN,
+                        CONFIG.FURNACE_ENTRY_SPIN
                     ),
                     math.random(
-                        -FURNACE_ENTRY_SPIN,
-                        FURNACE_ENTRY_SPIN
+                        -CONFIG.FURNACE_ENTRY_SPIN,
+                        CONFIG.FURNACE_ENTRY_SPIN
                     ),
                     math.random(
-                        -FURNACE_ENTRY_SPIN,
-                        FURNACE_ENTRY_SPIN
+                        -CONFIG.FURNACE_ENTRY_SPIN,
+                        CONFIG.FURNACE_ENTRY_SPIN
                     )
                 )
         end
     end
 
-    -- Move to furnace entrance
-    local pivotValue =
-        Instance.new("CFrameValue")
+
+    local pivotValue = Instance.new("CFrameValue")
 
     pivotValue.Value = currentPivot
 
     local pivotConnection =
-        pivotValue:GetPropertyChangedSignal(
-            "Value"
-        ):Connect(function()
-            if ragdoll.Parent then
-                ragdoll:PivotTo(
-                    pivotValue.Value
-                )
-            end
-        end)
+        pivotValue:GetPropertyChangedSignal("Value"):Connect(
+            function()
 
-    local approachTween =
-        TweenService:Create(
-            pivotValue,
-            TweenInfo.new(
-                0.35,
-                Enum.EasingStyle.Quad,
-                Enum.EasingDirection.In
-            ),
-            {
-                Value = entryCFrame
-            }
+                if ragdoll.Parent then
+                    ragdoll:PivotTo(pivotValue.Value)
+                end
+
+            end
         )
+
+
+    local approachTween = TweenService:Create(
+        pivotValue,
+        TweenInfo.new(
+            0.35,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.In
+        ),
+        {
+            Value = entryCFrame
+        }
+    )
 
     approachTween:Play()
     approachTween.Completed:Wait()
@@ -334,9 +315,10 @@ local function furnaceRagdollEffect(ragdoll)
     pivotConnection:Disconnect()
     pivotValue:Destroy()
 
+
     if not furnace.Parent
-        or not ragdoll.Parent
-    then
+        or not ragdoll.Parent then
+
         if furnace.Parent then
             furnace:Destroy()
         end
@@ -344,37 +326,41 @@ local function furnaceRagdollEffect(ragdoll)
         return
     end
 
+
     ragdoll:PivotTo(entryCFrame)
 
-    -- Move into furnace
-    local finalPivotValue =
-        Instance.new("CFrameValue")
+
+    --==================================================
+    -- THROW INTO FURNACE
+    --==================================================
+
+    local finalPivotValue = Instance.new("CFrameValue")
 
     finalPivotValue.Value = entryCFrame
 
     local finalPivotConnection =
-        finalPivotValue:GetPropertyChangedSignal(
-            "Value"
-        ):Connect(function()
-            if ragdoll.Parent then
-                ragdoll:PivotTo(
-                    finalPivotValue.Value
-                )
-            end
-        end)
+        finalPivotValue:GetPropertyChangedSignal("Value"):Connect(
+            function()
 
-    local finalThrowTween =
-        TweenService:Create(
-            finalPivotValue,
-            TweenInfo.new(
-                0.10,
-                Enum.EasingStyle.Quad,
-                Enum.EasingDirection.In
-            ),
-            {
-                Value = insideCFrame
-            }
+                if ragdoll.Parent then
+                    ragdoll:PivotTo(finalPivotValue.Value)
+                end
+
+            end
         )
+
+
+    local finalThrowTween = TweenService:Create(
+        finalPivotValue,
+        TweenInfo.new(
+            0.10,
+            Enum.EasingStyle.Quad,
+            Enum.EasingDirection.In
+        ),
+        {
+            Value = insideCFrame
+        }
+    )
 
     finalThrowTween:Play()
     finalThrowTween.Completed:Wait()
@@ -382,9 +368,10 @@ local function furnaceRagdollEffect(ragdoll)
     finalPivotConnection:Disconnect()
     finalPivotValue:Destroy()
 
+
     if not furnace.Parent
-        or not ragdoll.Parent
-    then
+        or not ragdoll.Parent then
+
         if furnace.Parent then
             furnace:Destroy()
         end
@@ -392,83 +379,95 @@ local function furnaceRagdollEffect(ragdoll)
         return
     end
 
+
     ragdoll:PivotTo(insideCFrame)
 
-    -- Furnace light
-    local pointLight =
-        Instance.new("PointLight")
+
+    --==================================================
+    -- LIGHT
+    --==================================================
+
+    local pointLight = Instance.new("PointLight")
 
     pointLight.Name = "FurnaceLight"
     pointLight.Brightness = 3
     pointLight.Range = 12
     pointLight.Shadows = true
+
     pointLight.Parent = furnace
+
 
     furnace.CanCollide = false
 
-    -- Clone
+
+    --==================================================
+    -- CLONE
+    --==================================================
+
     local clone
 
-    local success =
-        pcall(function()
-            clone = ragdoll:Clone()
-        end)
+    local success = pcall(function()
+        clone = ragdoll:Clone()
+    end)
 
     if not success or not clone then
+
         if pointLight then
             pointLight:Destroy()
         end
 
         furnace:Destroy()
+
         return
     end
+
 
     clone.Name = "FurnaceRagdoll"
     clone.Parent = Workspace
 
-    -- Make clone burnt
-    for _, obj in ipairs(
-        clone:GetDescendants()
-    ) do
+
+    --==================================================
+    -- BURNT LOOK
+    --==================================================
+
+    for _, obj in ipairs(clone:GetDescendants()) do
+
         if obj:IsA("Shirt")
             or obj:IsA("Pants")
             or obj:IsA("ShirtGraphic")
-            or obj:IsA("CharacterMesh")
-        then
+            or obj:IsA("CharacterMesh") then
+
             obj:Destroy()
 
         elseif obj:IsA("Decal")
             or obj:IsA("Texture")
-            or obj:IsA("SurfaceAppearance")
-        then
+            or obj:IsA("SurfaceAppearance") then
+
             obj:Destroy()
 
         elseif obj:IsA("SpecialMesh") then
-            obj.TextureId =
-                "rbxassetid://8039518300"
 
-            obj.VertexColor =
-                Vector3.new(0, 0, 0)
+            obj.TextureId = "rbxassetid://8039518300"
+            obj.VertexColor = Vector3.new(0, 0, 0)
+
         end
     end
 
-    -- Compact clone
+
+    --==================================================
+    -- COMPACT CLONE
+    --==================================================
+
     local cloneParts = {}
 
-    for _, obj in ipairs(
-        clone:GetDescendants()
-    ) do
+    for _, obj in ipairs(clone:GetDescendants()) do
+
         if obj:IsA("BasePart") then
-            table.insert(
-                cloneParts,
-                obj
-            )
 
-            obj.Color =
-                Color3.new(0, 0, 0)
+            table.insert(cloneParts, obj)
 
-            obj.Material =
-                Enum.Material.SmoothPlastic
+            obj.Color = Color3.new(0, 0, 0)
+            obj.Material = Enum.Material.SmoothPlastic
 
             if obj:IsA("MeshPart") then
                 pcall(function()
@@ -484,21 +483,29 @@ local function furnaceRagdollEffect(ragdoll)
         end
     end
 
+
     if #cloneParts == 0 then
+
         clone:Destroy()
         furnace:Destroy()
+
         return
     end
 
+
     pcall(function()
         clone:ScaleTo(
-            FURNACE_COMPACT_SCALE
+            CONFIG.FURNACE_COMPACT_SCALE
         )
     end)
 
     clone:PivotTo(furnace.CFrame)
 
-    -- Fire/smoke host
+
+    --==================================================
+    -- FIRE / SMOKE
+    --==================================================
+
     local flameHost =
         clone:FindFirstChild(
             "HumanoidRootPart",
@@ -506,12 +513,12 @@ local function furnaceRagdollEffect(ragdoll)
         )
 
     if not flameHost
-        or not flameHost:IsA("BasePart")
-    then
+        or not flameHost:IsA("BasePart") then
+
         flameHost = cloneParts[1]
     end
 
-    -- Fire
+
     local flameParticles =
         Instance.new("ParticleEmitter")
 
@@ -519,10 +526,10 @@ local function furnaceRagdollEffect(ragdoll)
         "FurnaceFireParticles"
 
     flameParticles.Texture =
-        FURNACE_FIRE_TEXTURE
+        CONFIG.FURNACE_FIRE_TEXTURE
 
     flameParticles.Rate =
-        FURNACE_FIRE_PARTICLE_RATE
+        CONFIG.FURNACE_FIRE_PARTICLE_RATE
 
     flameParticles.Lifetime =
         NumberRange.new(1, 1)
@@ -534,6 +541,7 @@ local function furnaceRagdollEffect(ragdoll)
         Vector2.new(15, 15)
 
     flameParticles.VelocitySpread = 15
+
     flameParticles.Rotation =
         NumberRange.new(0, 360)
 
@@ -542,14 +550,8 @@ local function furnaceRagdollEffect(ragdoll)
 
     flameParticles.Size =
         NumberSequence.new({
-            NumberSequenceKeypoint.new(
-                0,
-                1.188
-            ),
-            NumberSequenceKeypoint.new(
-                1,
-                0
-            )
+            NumberSequenceKeypoint.new(0, 1.188),
+            NumberSequenceKeypoint.new(1, 0)
         })
 
     flameParticles.Squash =
@@ -557,19 +559,14 @@ local function furnaceRagdollEffect(ragdoll)
 
     flameParticles.Transparency =
         NumberSequence.new({
-            NumberSequenceKeypoint.new(
-                0,
-                0.1
-            ),
-            NumberSequenceKeypoint.new(
-                1,
-                0.1
-            )
+            NumberSequenceKeypoint.new(0, 0.1),
+            NumberSequenceKeypoint.new(1, 0.1)
         })
 
     flameParticles.Brightness = 1
     flameParticles.LightEmission = 0
     flameParticles.LightInfluence = 1
+
     flameParticles.Orientation =
         Enum.ParticleOrientation.FacingCamera
 
@@ -577,9 +574,10 @@ local function furnaceRagdollEffect(ragdoll)
         Enum.NormalId.Top
 
     flameParticles.LockedToPart = false
+
     flameParticles.Parent = flameHost
 
-    -- Smoke
+
     local smokeParticles =
         Instance.new("ParticleEmitter")
 
@@ -587,9 +585,10 @@ local function furnaceRagdollEffect(ragdoll)
         "FurnaceSmokeParticles"
 
     smokeParticles.Texture =
-        FURNACE_SMOKE_TEXTURE
+        CONFIG.FURNACE_SMOKE_TEXTURE
 
     smokeParticles.Rate = 20
+
     smokeParticles.Lifetime =
         NumberRange.new(3.3, 3.3)
 
@@ -600,6 +599,7 @@ local function furnaceRagdollEffect(ragdoll)
         Vector2.new(15, 15)
 
     smokeParticles.VelocitySpread = 15
+
     smokeParticles.Rotation =
         NumberRange.new(0, 360)
 
@@ -608,14 +608,8 @@ local function furnaceRagdollEffect(ragdoll)
 
     smokeParticles.Size =
         NumberSequence.new({
-            NumberSequenceKeypoint.new(
-                0,
-                1
-            ),
-            NumberSequenceKeypoint.new(
-                1,
-                3.25
-            )
+            NumberSequenceKeypoint.new(0, 1),
+            NumberSequenceKeypoint.new(1, 3.25)
         })
 
     smokeParticles.Squash =
@@ -623,17 +617,12 @@ local function furnaceRagdollEffect(ragdoll)
 
     smokeParticles.Transparency =
         NumberSequence.new({
-            NumberSequenceKeypoint.new(
-                0,
-                0.35
-            ),
-            NumberSequenceKeypoint.new(
-                1,
-                0.1
-            )
+            NumberSequenceKeypoint.new(0, 0.35),
+            NumberSequenceKeypoint.new(1, 0.1)
         })
 
     smokeParticles.Brightness = 1
+
     smokeParticles.Color =
         ColorSequence.new(
             Color3.fromRGB(80, 80, 80)
@@ -641,6 +630,7 @@ local function furnaceRagdollEffect(ragdoll)
 
     smokeParticles.LightEmission = 0
     smokeParticles.LightInfluence = 1
+
     smokeParticles.Orientation =
         Enum.ParticleOrientation.FacingCamera
 
@@ -648,27 +638,36 @@ local function furnaceRagdollEffect(ragdoll)
         Enum.NormalId.Top
 
     smokeParticles.LockedToPart = false
+
     smokeParticles.Parent = flameHost
 
-    -- Furnace ON
-    setFrontTexture(
-        "101854274054509"
-    )
 
-    -- Remove original
+    --==================================================
+    -- FURNACE ON
+    --==================================================
+
+    setFrontTexture("101854274054509")
+
+
     if ragdoll.Parent then
         ragdoll:Destroy()
     end
 
+
     furnaceSound1:Play()
     furnaceSound2:Play()
 
-    -- Cook
-    task.wait(FURNACE_COOK_TIME)
+
+    --==================================================
+    -- COOK
+    --==================================================
+
+    task.wait(CONFIG.FURNACE_COOK_TIME)
+
 
     if not furnace.Parent
-        or not clone.Parent
-    then
+        or not clone.Parent then
+
         if furnace.Parent then
             furnace:Destroy()
         end
@@ -680,46 +679,62 @@ local function furnaceRagdollEffect(ragdoll)
         return
     end
 
-    -- Exit sound
+
+    --==================================================
+    -- EXIT SOUND
+    --==================================================
+
     local exitSound =
         Instance.new("Sound")
 
     exitSound.Name = "FurnaceExit"
+
     exitSound.SoundId =
         "rbxassetid://114005773348535"
 
     exitSound.Volume = 1
     exitSound.Parent = furnace
+
     exitSound:Play()
+
 
     if pointLight then
         pointLight:Destroy()
         pointLight = nil
     end
 
-    task.wait(FURNACE_DING_DELAY)
 
-    -- Full-size again
+    task.wait(CONFIG.FURNACE_DING_DELAY)
+
+
+    --==================================================
+    -- LAUNCH OUT
+    --==================================================
+
     pcall(function()
         clone:ScaleTo(1)
     end)
+
 
     local exitPosition =
         furnace.Position
         + furnace.CFrame.LookVector
         * (
-            FURNACE_SIZE.Z / 2
-            + FURNACE_EXIT_DISTANCE
+            CONFIG.FURNACE_SIZE.Z / 2
+            + CONFIG.FURNACE_EXIT_DISTANCE
         )
+
 
     clone:PivotTo(
         CFrame.new(exitPosition)
         * furnace.CFrame.Rotation
     )
 
-    -- Launch out
+
     for _, part in ipairs(cloneParts) do
+
         if part.Parent then
+
             part.Anchored = false
             part.CanCollide = true
             part.CanTouch = true
@@ -727,10 +742,10 @@ local function furnaceRagdollEffect(ragdoll)
 
             local exitVelocity =
                 furnace.CFrame.LookVector
-                * FURNACE_EXIT_SPEED
+                * CONFIG.FURNACE_EXIT_SPEED
                 + Vector3.new(
                     0,
-                    FURNACE_EXIT_UPWARD,
+                    CONFIG.FURNACE_EXIT_UPWARD,
                     0
                 )
 
@@ -746,7 +761,11 @@ local function furnaceRagdollEffect(ragdoll)
         end
     end
 
-    -- Thud
+
+    --==================================================
+    -- THUD
+    --==================================================
+
     local thudSound =
         Instance.new("Sound")
 
@@ -754,19 +773,22 @@ local function furnaceRagdollEffect(ragdoll)
         "FurnaceRagdollThud"
 
     thudSound.SoundId =
-        FURNACE_THUD_SOUND
+        CONFIG.FURNACE_THUD_SOUND
 
     thudSound.Volume = 1
     thudSound.RollOffMaxDistance = 80
+
     thudSound.Parent = flameHost
+
 
     local thudDebounce = false
 
     local function playThud(hit)
+
         if thudDebounce
             or not clone.Parent
-            or not hit
-        then
+            or not hit then
+
             return
         end
 
@@ -785,33 +807,39 @@ local function furnaceRagdollEffect(ragdoll)
         end)
     end
 
+
     for _, part in ipairs(cloneParts) do
+
         if part.Parent then
-            part.Touched:Connect(
-                playThud
-            )
+            part.Touched:Connect(playThud)
         end
     end
 
-    -- Restore furnace texture
+
+    --==================================================
+    -- RESTORE FURNACE
+    --==================================================
+
     task.wait(0.2)
 
     if furnace.Parent then
-        setFrontTexture(
-            "87665103173374"
-        )
+        setFrontTexture("87665103173374")
     end
 
     furnaceSound1:Stop()
     furnaceSound2:Stop()
 
-    -- Fade furnace
-    local fadeInfo =
-        TweenInfo.new(
-            FURNACE_FADE_TIME,
-            Enum.EasingStyle.Quad,
-            Enum.EasingDirection.Out
-        )
+
+    --==================================================
+    -- FADE FURNACE
+    --==================================================
+
+    local fadeInfo = TweenInfo.new(
+        CONFIG.FURNACE_FADE_TIME,
+        Enum.EasingStyle.Quad,
+        Enum.EasingDirection.Out
+    )
+
 
     TweenService:Create(
         furnace,
@@ -821,10 +849,11 @@ local function furnaceRagdollEffect(ragdoll)
         }
     ):Play()
 
-    for _, obj in ipairs(
-        furnace:GetChildren()
-    ) do
+
+    for _, obj in ipairs(furnace:GetChildren()) do
+
         if obj:IsA("Decal") then
+
             TweenService:Create(
                 obj,
                 fadeInfo,
@@ -832,36 +861,16 @@ local function furnaceRagdollEffect(ragdoll)
                     Transparency = 1
                 }
             ):Play()
+
         end
     end
 
+
     Debris:AddItem(
         furnace,
-        FURNACE_FADE_TIME + 0.1
+        CONFIG.FURNACE_FADE_TIME + 0.1
     )
 
-    Debris:AddItem(
-        exitSound,
-        3
-    )
+    Debris:AddItem(exitSound, 3)
+
 end
-
--- Existing ragdolls
-for _, existing in ipairs(
-    RagdollFolder:GetChildren()
-) do
-    task.spawn(
-        furnaceRagdollEffect,
-        existing
-    )
-end
-
--- New ragdolls
-RagdollFolder.ChildAdded:Connect(
-    function(child)
-        task.spawn(
-            furnaceRagdollEffect,
-            child
-        )
-    end
-)
