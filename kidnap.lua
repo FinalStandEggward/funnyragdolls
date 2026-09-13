@@ -23,9 +23,6 @@ local PhysicsService = game:GetService("PhysicsService")
 local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
 
---==================================================
--- CONFIG FROM MAIN LOADER
---==================================================
 
 local function getConfig(config, name, default)
     local value = config[name]
@@ -35,6 +32,54 @@ local function getConfig(config, name, default)
     return value
 end
 
+return function(ragdoll, CONFIG)
+    CONFIG = CONFIG or {}
+
+    if not ragdoll or not ragdoll:IsA("Model") then
+        return
+    end
+
+    if ragdoll:GetAttribute("FunnyRagdollsKidnapActive") then
+        return
+    end
+
+    ragdoll:SetAttribute("FunnyRagdollsKidnapActive", true)
+
+    local APPROACH_DISTANCE = getConfig(CONFIG, "KIDNAP_APPROACH_DISTANCE", 70)
+    local DRIVE_SPEED = getConfig(CONFIG, "KIDNAP_DRIVE_SPEED", 38)
+    local SPAWN_HEIGHT_OFFSET = getConfig(CONFIG, "KIDNAP_SPAWN_HEIGHT_OFFSET", 6)
+    local SPAWN_CALCULATION_DELAY = getConfig(CONFIG, "KIDNAP_SPAWN_CALCULATION_DELAY", 0.35)
+    local ARRIVAL_PAUSE = getConfig(CONFIG, "KIDNAP_ARRIVAL_PAUSE", 0.65)
+    local DOOR_OUTWARD_DISTANCE = getConfig(CONFIG, "KIDNAP_DOOR_OUTWARD_DISTANCE", 1.0)
+    local PICKUP_SIDE_OFFSET = getConfig(CONFIG, "KIDNAP_PICKUP_SIDE_OFFSET", 0.0)
+    local VAN_HEIGHT_OFFSET = getConfig(CONFIG, "KIDNAP_VAN_HEIGHT_OFFSET", 2.0)
+    local DOOR_SLIDE_DISTANCE = getConfig(CONFIG, "KIDNAP_DOOR_SLIDE_DISTANCE", 5.5)
+    local DOOR_STEP_TIME = getConfig(CONFIG, "KIDNAP_DOOR_STEP_TIME", 0.10)
+    local INSIDE_PAUSE = getConfig(CONFIG, "KIDNAP_INSIDE_PAUSE", 1.0)
+    local DEPART_PAUSE = getConfig(CONFIG, "KIDNAP_DEPART_PAUSE", 0.35)
+    local DEPART_DISTANCE = getConfig(CONFIG, "KIDNAP_DEPART_DISTANCE", 65)
+    local DEPART_SPEED = getConfig(CONFIG, "KIDNAP_DEPART_SPEED", 45)
+    local EXPLOSION_CHANCE = getConfig(CONFIG, "KIDNAP_EXPLOSION_CHANCE", 0.20)
+    local EXPLOSION_RADIUS = getConfig(CONFIG, "KIDNAP_EXPLOSION_RADIUS", 14)
+    local EXPLOSION_PRESSURE = getConfig(CONFIG, "KIDNAP_EXPLOSION_PRESSURE", 500000)
+    local VAN_GROUP = getConfig(CONFIG, "KIDNAP_VAN_GROUP", "RagdollVan_v6")
+    local PASSENGER_GROUP = getConfig(CONFIG, "KIDNAP_PASSENGER_GROUP", "RagdollVanPassenger_v6")
+
+    pcall(function()
+        PhysicsService:RegisterCollisionGroup(VAN_GROUP)
+    end)
+
+    pcall(function()
+        PhysicsService:RegisterCollisionGroup(PASSENGER_GROUP)
+    end)
+
+    pcall(function()
+        PhysicsService:CollisionGroupSetCollidable(VAN_GROUP, "Default", false)
+        PhysicsService:CollisionGroupSetCollidable(VAN_GROUP, VAN_GROUP, false)
+        PhysicsService:CollisionGroupSetCollidable(VAN_GROUP, PASSENGER_GROUP, true)
+        PhysicsService:CollisionGroupSetCollidable(PASSENGER_GROUP, "Default", false)
+        PhysicsService:CollisionGroupSetCollidable(PASSENGER_GROUP, PASSENGER_GROUP, false)
+    end)
 
 --==================================================
 -- ORIGINAL WORKING VAN MODEL
@@ -1630,22 +1675,24 @@ end
 -- ONE RAGDOLL SEQUENCE
 --==================================================
 
-local function runKidnap(ragdoll)
-    if not ragdoll:IsA("Model") then
+local function processRagdoll(ragdoll)
+    if not ragdoll or not ragdoll.Parent or not ragdoll:IsA("Model") then
         return
     end
 
     local root = ragdoll:FindFirstChild("HumanoidRootPart")
+        or ragdoll:FindFirstChild("UpperTorso")
+        or ragdoll:FindFirstChild("Torso")
         or ragdoll:FindFirstChildWhichIsA("BasePart")
 
-    if not root then
+    if not root or not root:IsA("BasePart") then
         return
     end
 
     local van
     local carryConnection
 
-    local success, err = pcall(function()
+    local success, err = xpcall(function()
             -- Wait briefly so the ragdoll settles, then sample its torso
             -- immediately before the van is created and positioned.
             task.wait(SPAWN_CALCULATION_DELAY)
@@ -1800,21 +1847,23 @@ local function runKidnap(ragdoll)
             else
                 van:Destroy()
             end
-    end)
+    end, debug.traceback)
 
     if carryConnection then
         carryConnection:Disconnect()
+        carryConnection = nil
     end
 
     if not success then
-        warn("[FunnyRagdolls][Kidnap] Sequence error:", err)
+        warn("[FunnyRagdolls][Kidnap] Sequence error:\n" .. tostring(err))
         if van and van.Parent then
             van:Destroy()
         end
     end
 end
 
-    runKidnap(ragdoll)
+
+    processRagdoll(ragdoll)
 
     if ragdoll and ragdoll.Parent then
         ragdoll:SetAttribute("FunnyRagdollsKidnapActive", nil)
