@@ -1,6 +1,7 @@
 -- FunnyRagdolls portal effect (derived from stable RainbowAnywhere_10s version).
 -- The loader owns configuration and ragdoll discovery. This file returns
 -- exactly one function: function(ragdoll, CONFIG).
+-- Runtime constants are read directly from CONFIG to avoid Luau local limits.
 -- Publish as portal.lua at your GitHub raw URL.
 
 local function CreatePortalEngine(CONFIG)
@@ -20,164 +21,76 @@ local function CreatePortalEngine(CONFIG)
   local Debris = game:GetService("Debris")
   local RAGDOLLS_FOLDER = Workspace:WaitForChild("Ragdolls")
 
-  local PORTAL_FILE = CONFIG.PORTAL_FILE
-  local AUDIO = CONFIG.AUDIO
-  local SETTLE_TIME, GROW_TIME, SHRINK_TIME = CONFIG.SETTLE_TIME, CONFIG.GROW_TIME, CONFIG.SHRINK_TIME
-  local START_SCALE, FINAL_SCALE, END_SCALE = CONFIG.START_SCALE, CONFIG.FINAL_SCALE, CONFIG.END_SCALE
-  local TRAVEL_TIME, LINGER_TIME = CONFIG.TRAVEL_TIME, CONFIG.LINGER_TIME
-  local ROTATION_SPEED, PORTAL_OFFSET = CONFIG.ROTATION_SPEED, CONFIG.PORTAL_OFFSET
-  local MAX_PORTAL_HOPS, EXIT_SEARCH_RADIUS = CONFIG.MAX_PORTAL_HOPS, CONFIG.EXIT_SEARCH_RADIUS
-  local EXIT_LAUNCH_SPEED, NEXT_PORTAL_DELAY = CONFIG.EXIT_LAUNCH_SPEED, CONFIG.NEXT_PORTAL_DELAY
-  local ENTRY_TIMEOUT = CONFIG.ENTRY_TIMEOUT -- legacy unused entry helper
-  local ABOVE_BOUNCE_AFTER = CONFIG.ABOVE_BOUNCE_AFTER
-  local GROUND_BOUNCE_AFTER = CONFIG.GROUND_BOUNCE_AFTER
-  local BOUNCE_SPEED = CONFIG.BOUNCE_SPEED
-  local ABOVE_PORTAL_CHANCE = CONFIG.ABOVE_PORTAL_CHANCE -- 25% above-ragdoll portal; 75% ground portal
-  local ABOVE_PORTAL_HEIGHT_MIN, ABOVE_PORTAL_HEIGHT_MAX = CONFIG.ABOVE_PORTAL_HEIGHT_MIN, CONFIG.ABOVE_PORTAL_HEIGHT_MAX
-  local GROUND_RAY_START_HEIGHT, GROUND_RAY_DISTANCE = CONFIG.GROUND_RAY_START_HEIGHT, CONFIG.GROUND_RAY_DISTANCE
-  local MAX_GROUND_DROP = CONFIG.MAX_GROUND_DROP -- Reject floors far below the ragdoll.
-  local GROUND_CLEARANCE_BELOW_BODY = CONFIG.GROUND_CLEARANCE_BELOW_BODY
-  local SURFACE_CLEARANCE = CONFIG.SURFACE_CLEARANCE
-  local SOUND_MAX_DISTANCE = CONFIG.SOUND_MAX_DISTANCE
-  local SOUND_MIN_DISTANCE = CONFIG.SOUND_MIN_DISTANCE
-  local ENABLE_CLOSING_FLUID = CONFIG.ENABLE_CLOSING_FLUID
-  local CLOSING_FLUID_DROPS = CONFIG.CLOSING_FLUID_DROPS
-  local MAX_SURFACE_ADJUSTMENTS = CONFIG.MAX_SURFACE_ADJUSTMENTS
-  local SURFACE_ADJUST_STEP = CONFIG.SURFACE_ADJUST_STEP
-  local EXIT_CANDIDATE_ATTEMPTS = CONFIG.EXIT_CANDIDATE_ATTEMPTS
+  -- legacy unused entry helper
+  -- 25% above-ragdoll portal; 75% ground portal
+  -- Reject floors far below the ragdoll.
   -- Camera-aware exits. Keep entrance portals near their ragdolls.
-  local CAMERA_AWARE_EXITS = CONFIG.CAMERA_AWARE_EXITS
-  local CAMERA_VIEW_MARGIN = CONFIG.CAMERA_VIEW_MARGIN -- reserve 14% of screen edges
-  local CAMERA_MAX_EXIT_DISTANCE = CONFIG.CAMERA_MAX_EXIT_DISTANCE -- studs from camera
-  local CAMERA_VISIBLE_ATTEMPTS = CONFIG.CAMERA_VISIBLE_ATTEMPTS
-  local CAMERA_RAY_LENGTH = CONFIG.CAMERA_RAY_LENGTH
+  -- reserve 14% of screen edges
+  -- studs from camera
   -- Chain duplication and clone cleanup
   -- Experimental airborne portal-to-portal ballistic transfer
-  local MIDAIR_CHAIN_CHANCE = CONFIG.MIDAIR_CHAIN_CHANCE -- existing chance in normal chains
-  local AIR_ONLY_LIFETIME_CHANCE = CONFIG.AIR_ONLY_LIFETIME_CHANCE -- a ragdoll has a 20% chance to use ONLY midair portals
-  local AIR_ONLY_MAX_SPAWN_ATTEMPTS = CONFIG.AIR_ONLY_MAX_SPAWN_ATTEMPTS -- find a camera-visible floating corridor
-  local AIR_ONLY_RETRY_INTERVAL = CONFIG.AIR_ONLY_RETRY_INTERVAL -- retry if the current camera view is obstructed
+  -- existing chance in normal chains
+  -- a ragdoll has a 20% chance to use ONLY midair portals
+  -- find a camera-visible floating corridor
+  -- retry if the current camera view is obstructed
   -- ONLY midair-to-midair travel is deliberately controlled.
   -- All ordinary exits and floor landings retain their random physics.
-  local MIDAIR_FLIGHT_TIME = CONFIG.MIDAIR_FLIGHT_TIME -- 3.5x faster midair flight; change only this for speed tuning
-  local MIDAIR_SPACING_MIN, MIDAIR_SPACING_MAX = CONFIG.MIDAIR_SPACING_MIN, CONFIG.MIDAIR_SPACING_MAX
-  local MIDAIR_WALL_ATTACH_CHANCE = CONFIG.MIDAIR_WALL_ATTACH_CHANCE -- wall mounting is attempted on 60% of pairs
-  local MIDAIR_WALL_SEARCH_DISTANCE = CONFIG.MIDAIR_WALL_SEARCH_DISTANCE -- look for a suitable wall near either endpoint
-  local MIDAIR_DIRECTION_VERTICALITY = CONFIG.MIDAIR_DIRECTION_VERTICALITY -- allow diagonal and vertical changes
-  local MIDAIR_DIRECTION_DEPTH = CONFIG.MIDAIR_DIRECTION_DEPTH -- vary depth relative to camera
-  local MIDAIR_HEIGHT = CONFIG.MIDAIR_HEIGHT
-  local MIDAIR_ARRIVAL_RADIUS = CONFIG.MIDAIR_ARRIVAL_RADIUS
-  local MIDAIR_MAX_WAIT = CONFIG.MIDAIR_MAX_WAIT -- recovery guard, NOT the normal flight duration
-  local MIDAIR_STRAIGHT_STEERING = CONFIG.MIDAIR_STRAIGHT_STEERING -- stronger lateral stability at high speed
-  local MIDAIR_MAX_STEERING_SPEED = CONFIG.MIDAIR_MAX_STEERING_SPEED
+  -- 3.5x faster midair flight; change only this for speed tuning
+  -- wall mounting is attempted on 60% of pairs
+  -- look for a suitable wall near either endpoint
+  -- allow diagonal and vertical changes
+  -- vary depth relative to camera
+  -- recovery guard, NOT the normal flight duration
+  -- stronger lateral stability at high speed
   -- Prediction lookahead is a search DISTANCE in time, not an entry timer.
   -- Portals trigger only when the actual ragdoll reaches their plane.
-  local PREDICTION_LOOKAHEAD = CONFIG.PREDICTION_LOOKAHEAD
-  local PREDICTION_STEP = CONFIG.PREDICTION_STEP
-  local ENTRY_CAPTURE_RADIUS = CONFIG.ENTRY_CAPTURE_RADIUS
-  local ENTRY_CAPTURE_MARGIN = CONFIG.ENTRY_CAPTURE_MARGIN
   -- Limit how far and how often a predicted landing portal can move.
   -- Small changes in the prediction are ignored; the final approach is locked.
-  local ENTRY_REPOSITION_EPSILON = CONFIG.ENTRY_REPOSITION_EPSILON
-  local PREDICTION_MAX_REPOSITIONS = CONFIG.PREDICTION_MAX_REPOSITIONS
-  local PREDICTION_MAX_TOTAL_MOVE = CONFIG.PREDICTION_MAX_TOTAL_MOVE
-  local PREDICTION_MAX_STEP = CONFIG.PREDICTION_MAX_STEP
-  local PREDICTION_REPOSITION_COOLDOWN = CONFIG.PREDICTION_REPOSITION_COOLDOWN
-  local PREDICTION_FREEZE_HEIGHT = CONFIG.PREDICTION_FREEZE_HEIGHT
-  local PREDICTION_REPLAN_DISTANCE = CONFIG.PREDICTION_REPLAN_DISTANCE -- discard outdated entrance when the actual landing floor changes
-  local PREDICTION_EARLY_ASSIST_TIME = CONFIG.PREDICTION_EARLY_ASSIST_TIME -- earlier correction if entry becomes unlikely
-  local PREDICTION_SWEEP_RADIUS = CONFIG.PREDICTION_SWEEP_RADIUS -- account for wide ragdoll bodies near walls
-  local PREDICTION_LANDING_CLEARANCE = CONFIG.PREDICTION_LANDING_CLEARANCE -- don't spawn a portal inside blocking parts
+  -- discard outdated entrance when the actual landing floor changes
+  -- earlier correction if entry becomes unlikely
+  -- account for wide ragdoll bodies near walls
+  -- don't spawn a portal inside blocking parts
   -- Only ignore collisions with fully opaque (Transparency == 0) nearby BaseParts.
-  local PASS_THROUGH_OPAQUE = CONFIG.PASS_THROUGH_OPAQUE
-  local OPAQUE_SCAN_RADIUS = CONFIG.OPAQUE_SCAN_RADIUS
-  local OPAQUE_SCAN_INTERVAL = CONFIG.OPAQUE_SCAN_INTERVAL
-  local OPAQUE_MAX_NEARBY_PARTS = CONFIG.OPAQUE_MAX_NEARBY_PARTS
-  local FORCE_GROUND_ENTRANCES = CONFIG.FORCE_GROUND_ENTRANCES
-  local GROUND_ENTRY_SEARCH_RADIUS = CONFIG.GROUND_ENTRY_SEARCH_RADIUS
   -- Stuck ragdoll watchdog: after 2.5 seconds without an entrance teleport,
   -- temporarily disable ragdoll collisions and force it into its CURRENT portal.
-  local STUCK_TELEPORT_TIMEOUT = CONFIG.STUCK_TELEPORT_TIMEOUT
-  local STUCK_PULL_SPEED = CONFIG.STUCK_PULL_SPEED -- studs per second, rescue only
-  local STUCK_PORTAL_OVERSHOOT = CONFIG.STUCK_PORTAL_OVERSHOOT -- aim through the plane, not just at the surface
-  local STUCK_CAPTURE_EXTRA_RADIUS = CONFIG.STUCK_CAPTURE_EXTRA_RADIUS
+  -- studs per second, rescue only
+  -- aim through the plane, not just at the surface
   -- Final one-way 'blender dimension' portal. This counts time since the last
   -- COMPLETED teleport, not time since a portal was created or approached.
-  local FINAL_PORTAL_STALL_TIME = CONFIG.FINAL_PORTAL_STALL_TIME
-  local FINAL_SUCTION_MAX_SPEED = CONFIG.FINAL_SUCTION_MAX_SPEED
-  local FINAL_SUCTION_RESPONSE = CONFIG.FINAL_SUCTION_RESPONSE
-  local FINAL_SUCTION_CAPTURE_RADIUS = CONFIG.FINAL_SUCTION_CAPTURE_RADIUS
-  local FINAL_SUCTION_MAX_DURATION = CONFIG.FINAL_SUCTION_MAX_DURATION -- fail-safe only; entry itself is plane-driven
+  -- fail-safe only; entry itself is plane-driven
   -- Terminal endings: slower than regular portal hops.
-  local FINAL_PORTAL_SHAKE_DURATION = CONFIG.FINAL_PORTAL_SHAKE_DURATION -- blender holds/shakes for a full five seconds
-  local TERMINAL_BOMB_CHANCE = CONFIG.TERMINAL_BOMB_CHANCE -- 40% bomb, 60% blender
-  local FINAL_PORTAL_OPEN_WAIT = CONFIG.FINAL_PORTAL_OPEN_WAIT -- preserve the normal elastic opening speed
-  local FINAL_RAGDOLL_CLEANUP_DELAY = CONFIG.FINAL_RAGDOLL_CLEANUP_DELAY -- after ejecting, no additional chains
-  local BOMB_OVERHEAD_HEIGHT = CONFIG.BOMB_OVERHEAD_HEIGHT
-  local BOMB_DROP_SETTLE = CONFIG.BOMB_DROP_SETTLE -- let the bomb physically drop before arming
-  local BOMB_ARM_TIME = CONFIG.BOMB_ARM_TIME
+  -- blender holds/shakes for a full five seconds
+  -- 40% bomb, 60% blender
+  -- preserve the normal elastic opening speed
+  -- after ejecting, no additional chains
+  -- let the bomb physically drop before arming
   -- Cartoon bomb shockwave: affects EVERY nearby ragdoll and ends its portal chain.
-  local BOMB_BLAST_RADIUS = CONFIG.BOMB_BLAST_RADIUS -- studs from explosion center
-  local BOMB_SHOCKWAVE_SPEED = CONFIG.BOMB_SHOCKWAVE_SPEED -- horizontal/radial launch strength
-  local BOMB_SHOCKWAVE_LIFT = CONFIG.BOMB_SHOCKWAVE_LIFT -- upward impulse
-  local BOMB_CHAR_COLOR = CONFIG.BOMB_CHAR_COLOR
-  local BOMB_CHAR_MATERIAL = CONFIG.BOMB_CHAR_MATERIAL -- plain black, no charred/slate surface
-  local BOMB_CHARRED_CLEANUP_DELAY = CONFIG.BOMB_CHARRED_CLEANUP_DELAY
-  local BOMB_PART_SEPARATION_CHANCE = CONFIG.BOMB_PART_SEPARATION_CHANCE -- independent chance for each blast-affected ragdoll
-  local BOMB_SEPARATION_FLUID_DURATION = CONFIG.BOMB_SEPARATION_FLUID_DURATION -- stylized red droplets from released attachment points
-  local BOMB_VISUAL_COLOR = CONFIG.BOMB_VISUAL_COLOR
+  -- studs from explosion center
+  -- horizontal/radial launch strength
+  -- upward impulse
+  -- plain black, no charred/slate surface
+  -- independent chance for each blast-affected ragdoll
+  -- stylized red droplets from released attachment points
   -- Positional bomb sounds. Optionally supply PrimeBombTick.mp3 and
   -- PrimeBombExplosion.mp3 next to the Lua file for getcustomasset().
-  local BOMB_TICK_FILE = CONFIG.BOMB_TICK_FILE
-  local BOMB_EXPLOSION_SOUND_FILE = CONFIG.BOMB_EXPLOSION_SOUND_FILE
-  local BOMB_TICK_SOUND_ID = CONFIG.BOMB_TICK_SOUND_ID -- no unrelated fallback; provide ticking.mp3
-  local BOMB_EXPLOSION_SOUND_ID = CONFIG.BOMB_EXPLOSION_SOUND_ID -- no unrelated fallback; provide neutrinobomb.mp3
-  local BOMB_BEEP_INTERVAL = CONFIG.BOMB_BEEP_INTERVAL
-  local BOMB_SOUND_MAX_DISTANCE = CONFIG.BOMB_SOUND_MAX_DISTANCE
-  local PRIME_BOMB_EXPLOSION_FILE = CONFIG.PRIME_BOMB_EXPLOSION_FILE
-  local PRIME_BOMB_DEATH_AURA_FILE = CONFIG.PRIME_BOMB_DEATH_AURA_FILE
-  local FINAL_PORTAL_DISTANCE = CONFIG.FINAL_PORTAL_DISTANCE
-  local FINAL_BLOOD_COLOR = CONFIG.FINAL_BLOOD_COLOR
-  local FINAL_SHAKE_BLOOD_INTERVAL = CONFIG.FINAL_SHAKE_BLOOD_INTERVAL -- 5 seconds of fluid, but cap the particle budget
-  local FINAL_EJECT_SPEED = CONFIG.FINAL_EJECT_SPEED
-  local FINAL_TEAROFF_MIN = CONFIG.FINAL_TEAROFF_MIN
-  local FINAL_TEAROFF_MAX = CONFIG.FINAL_TEAROFF_MAX
-  local CLONE_CHANCE = CONFIG.CLONE_CHANCE -- each completed teleport may produce one clone
-  local CLONE_LIFETIME = CONFIG.CLONE_LIFETIME -- seconds, measured from clone creation
+  -- no unrelated fallback; provide ticking.mp3
+  -- no unrelated fallback; provide neutrinobomb.mp3
+  -- 5 seconds of fluid, but cap the particle budget
+  -- each completed teleport may produce one clone
+  -- seconds, measured from clone creation
   -- Prototype blue portals: a limited infinite-falling sequence, then sideways launch.
-  local BLUE_LOOP_CHANCE = CONFIG.BLUE_LOOP_CHANCE -- roll after each successful ordinary teleport
-  local BLUE_LOOP_MIN_FALLS = CONFIG.BLUE_LOOP_MIN_FALLS
-  local BLUE_LOOP_MAX_FALLS = CONFIG.BLUE_LOOP_MAX_FALLS
-  local BLUE_LOOP_HEIGHT = CONFIG.BLUE_LOOP_HEIGHT
-  local BLUE_LOOP_START_SPEED = CONFIG.BLUE_LOOP_START_SPEED
-  local BLUE_LOOP_SPEED_GAIN = CONFIG.BLUE_LOOP_SPEED_GAIN
-  local BLUE_LOOP_MAX_SPEED = CONFIG.BLUE_LOOP_MAX_SPEED
-  local BLUE_LOOP_CAPTURE_RADIUS = CONFIG.BLUE_LOOP_CAPTURE_RADIUS
-  local BLUE_LOOP_STEERING = CONFIG.BLUE_LOOP_STEERING
-  local BLUE_LOOP_MAX_PASS_TIME = CONFIG.BLUE_LOOP_MAX_PASS_TIME -- missed-crossing safety only
-  local BLUE_LOOP_SIDE_LAUNCH = CONFIG.BLUE_LOOP_SIDE_LAUNCH
-  local BLUE_RETURN_DISTANCE = CONFIG.BLUE_RETURN_DISTANCE -- green portal opens early ahead of the blue sideways launch
-  local BLUE_RETURN_TIMEOUT = CONFIG.BLUE_RETURN_TIMEOUT
-  local BLUE_RETURN_CAPTURE_RADIUS = CONFIG.BLUE_RETURN_CAPTURE_RADIUS
-  local BLUE_PORTAL_COLOR = CONFIG.BLUE_PORTAL_COLOR
-  local BLUE_PORTAL_GLOW = CONFIG.BLUE_PORTAL_GLOW
+  -- roll after each successful ordinary teleport
+  -- missed-crossing safety only
+  -- green portal opens early ahead of the blue sideways launch
   -- Every newly created portal independently rolls for a rainbow override,
   -- including entrances, air pairs, blue-loop portals, return catches and terminals.
-  local RAINBOW_PORTAL_DENOMINATOR = CONFIG.RAINBOW_PORTAL_DENOMINATOR
-  local RAINBOW_PORTAL_LINGER = CONFIG.RAINBOW_PORTAL_LINGER -- seconds AFTER this portal would normally close
-  local RAINBOW_PORTAL_HUE_SPEED = CONFIG.RAINBOW_PORTAL_HUE_SPEED
-  local RAINBOW_RAGDOLL_HUE_SPEED = CONFIG.RAINBOW_RAGDOLL_HUE_SPEED
-  local RAINBOW_COLOR_UPDATE = CONFIG.RAINBOW_COLOR_UPDATE
+  -- seconds AFTER this portal would normally close
   -- Stylized red portal fluid ONLY from the remaining attachment points after
   -- a Blender Dimension ejection (never from ordinary portal travel).
-  local BLENDER_EXIT_FLUID = CONFIG.BLENDER_EXIT_FLUID
-  local BLENDER_EXIT_FLUID_COLOR = CONFIG.BLENDER_EXIT_FLUID_COLOR
-  local BLENDER_EXIT_FLUID_DURATION = CONFIG.BLENDER_EXIT_FLUID_DURATION
-  local BLENDER_EXIT_FLUID_INTERVAL = CONFIG.BLENDER_EXIT_FLUID_INTERVAL
-  local MAX_ACTIVE_CLONES = CONFIG.MAX_ACTIVE_CLONES -- prevents runaway exponential cloning
-  local MAX_TOTAL_CLONES = CONFIG.MAX_TOTAL_CLONES -- total spawned by this script
-  local BANISH_DISTANCE = CONFIG.BANISH_DISTANCE -- off-map teleport before deletion
-  local CLONE_FAILSAFE_TIME = CONFIG.CLONE_FAILSAFE_TIME -- clean up if it cannot reach another portal
+  -- prevents runaway exponential cloning
+  -- total spawned by this script
+  -- off-map teleport before deletion
+  -- clean up if it cannot reach another portal
 
   local function LoadAudio(fileName, fallbackId)
    if getcustomasset then
@@ -189,11 +102,6 @@ local function CreatePortalEngine(CONFIG)
   end
 
   -- Standalone MintBlood-inspired effect: no game-specific modules or folders needed.
-  local FLUID_SPEED = CONFIG.FLUID_SPEED
-  local FLUID_SPREAD_DEGREES = CONFIG.FLUID_SPREAD_DEGREES
-  local FLUID_LIFETIME = CONFIG.FLUID_LIFETIME
-  local FLUID_SPLASH_DURATION = CONFIG.FLUID_SPLASH_DURATION
-  local FLUID_MAX_CAMERA_DISTANCE = CONFIG.FLUID_MAX_CAMERA_DISTANCE
   local fluidRandom = Random.new()
   local fluidFolder = Instance.new("Folder")
   fluidFolder.Name = "LocalPortalFluid"
@@ -226,12 +134,12 @@ local function CreatePortalEngine(CONFIG)
    trail.MinLength = 0.03
    trail.FaceCamera = true
    trail.Parent = drop
-   local spread = math.rad(FLUID_SPREAD_DEGREES)
-   local velocity = (direction + Vector3.new(fluidRandom:NextNumber(-spread, spread), fluidRandom:NextNumber(-spread, spread), fluidRandom:NextNumber(-spread, spread))).Unit * (FLUID_SPEED + fluidRandom:NextNumber(-5, 5))
+   local spread = math.rad(CONFIG.FLUID_SPREAD_DEGREES)
+   local velocity = (direction + Vector3.new(fluidRandom:NextNumber(-spread, spread), fluidRandom:NextNumber(-spread, spread), fluidRandom:NextNumber(-spread, spread))).Unit * (CONFIG.FLUID_SPEED + fluidRandom:NextNumber(-5, 5))
    local start = os.clock()
    local connection
    connection = RunService.Heartbeat:Connect(function(dt)
-    if not drop.Parent or os.clock() - start > FLUID_LIFETIME then
+    if not drop.Parent or os.clock() - start > CONFIG.FLUID_LIFETIME then
      connection:Disconnect()
      if drop.Parent then drop:Destroy() end
      return
@@ -260,7 +168,7 @@ local function CreatePortalEngine(CONFIG)
      drop.CFrame = CFrame.fromMatrix(hit.Position + normal*0.025, xAxis, normal, zAxis)
      local scale = fluidRandom:NextNumber(0.4, 1.5)
      TweenService:Create(drop, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = Vector3.new(scale, 0.015, scale)}):Play()
-     task.delay(FLUID_SPLASH_DURATION, function()
+     task.delay(CONFIG.FLUID_SPLASH_DURATION, function()
       if drop.Parent then
        local tween = TweenService:Create(drop, TweenInfo.new(0.7), {Transparency = 1, Size = Vector3.new(0.01, 0.015, 0.01)})
        tween:Play()
@@ -292,8 +200,8 @@ local function CreatePortalEngine(CONFIG)
    sound.SoundId = LoadAudio(info.File, info.ID)
    sound.Volume = .7
    sound.RollOffMode = Enum.RollOffMode.InverseTapered
-   sound.RollOffMinDistance = SOUND_MIN_DISTANCE
-   sound.RollOffMaxDistance = SOUND_MAX_DISTANCE
+   sound.RollOffMinDistance = CONFIG.SOUND_MIN_DISTANCE
+   sound.RollOffMaxDistance = CONFIG.SOUND_MAX_DISTANCE
    sound.Parent = emitter
    sound:Play()
    Debris:AddItem(emitter, 20)
@@ -329,13 +237,13 @@ local function CreatePortalEngine(CONFIG)
    local sound=Instance.new("Sound")
    sound.Name=holder.Name
    sound.SoundId=isExplosion
-    and ResolveTerminalSound("PrimeBombExplosion",BOMB_EXPLOSION_SOUND_FILE,BOMB_EXPLOSION_SOUND_ID)
-    or ResolveTerminalSound("PrimeBombTick",BOMB_TICK_FILE,BOMB_TICK_SOUND_ID)
+    and ResolveTerminalSound("PrimeBombExplosion",CONFIG.BOMB_EXPLOSION_SOUND_FILE,CONFIG.BOMB_EXPLOSION_SOUND_ID)
+    or ResolveTerminalSound("PrimeBombTick",CONFIG.BOMB_TICK_FILE,CONFIG.BOMB_TICK_SOUND_ID)
    sound.Volume=isExplosion and 10 or 3.5
    sound.PlaybackSpeed=playbackSpeed or 1
    sound.RollOffMode=Enum.RollOffMode.InverseTapered
    sound.RollOffMinDistance=8
-   sound.RollOffMaxDistance=BOMB_SOUND_MAX_DISTANCE
+   sound.RollOffMaxDistance=CONFIG.BOMB_SOUND_MAX_DISTANCE
    sound.Parent=holder
    sound:Play()
    Debris:AddItem(holder,isExplosion and 20 or 12)
@@ -344,11 +252,11 @@ local function CreatePortalEngine(CONFIG)
   end
 
   local function EmitPortalClosingFluid(frame, size, color)
-   if not ENABLE_CLOSING_FLUID then return end
+   if not CONFIG.ENABLE_CLOSING_FLUID then return end
    local camera = Workspace.CurrentCamera
-   if camera and (camera.CFrame.Position - frame.Position).Magnitude > FLUID_MAX_CAMERA_DISTANCE then return end
+   if camera and (camera.CFrame.Position - frame.Position).Magnitude > CONFIG.FLUID_MAX_CAMERA_DISTANCE then return end
    local rx, ry = math.max(size.X * 0.36, 0.5), math.max(size.Y * 0.36, 0.5)
-   for _ = 1, CLOSING_FLUID_DROPS do
+   for _ = 1, CONFIG.CLOSING_FLUID_DROPS do
     local theta = fluidRandom:NextNumber(0, math.pi * 2)
     local radius = math.sqrt(fluidRandom:NextNumber())
     local origin = (frame * CFrame.new(math.cos(theta)*rx*radius, math.sin(theta)*ry*radius, -0.18)).Position
@@ -358,7 +266,7 @@ local function CreatePortalEngine(CONFIG)
 
   local function LoadPortal()
    if not getcustomasset then warn("[Portal] getcustomasset unavailable"); return nil end
-   local ok, assetId = pcall(function() return getcustomasset(PORTAL_FILE) end)
+   local ok, assetId = pcall(function() return getcustomasset(CONFIG.PORTAL_FILE) end)
    if not ok or not assetId then warn("[Portal] Could not load Portal.rbxm:", assetId); return nil end
    local ok2, objects = pcall(function() return game:GetObjects(assetId) end)
    if not ok2 or not objects or not objects[1] then warn("[Portal] GetObjects failed:", objects); return nil end
@@ -383,7 +291,7 @@ local function CreatePortalEngine(CONFIG)
   -- PhysicsService collision groups are deliberately avoided because changing
   -- existing map groups could break unrelated game systems.
   local function StartOpaquePassThrough(model)
-   if not PASS_THROUGH_OPAQUE then return function() end end
+   if not CONFIG.PASS_THROUGH_OPAQUE then return function() end end
    local holder = Instance.new("Folder")
    holder.Name = "PortalOpaquePassThrough"
    holder.Parent = model
@@ -393,7 +301,7 @@ local function CreatePortalEngine(CONFIG)
    local scanParams = OverlapParams.new()
    scanParams.FilterType = Enum.RaycastFilterType.Exclude
    scanParams.FilterDescendantsInstances = {RAGDOLLS_FOLDER, fluidFolder}
-   scanParams.MaxParts = OPAQUE_MAX_NEARBY_PARTS
+   scanParams.MaxParts = CONFIG.OPAQUE_MAX_NEARBY_PARTS
    local function update()
     local body = GetBodyPart(model)
     if not body then return end
@@ -404,7 +312,7 @@ local function CreatePortalEngine(CONFIG)
      end
     end
     local nearby = {}
-    for _, worldPart in ipairs(Workspace:GetPartBoundsInRadius(body.Position, OPAQUE_SCAN_RADIUS, scanParams)) do
+    for _, worldPart in ipairs(Workspace:GetPartBoundsInRadius(body.Position, CONFIG.OPAQUE_SCAN_RADIUS, scanParams)) do
      if worldPart:IsA("BasePart") and worldPart.CanCollide and worldPart.Transparency == 0
       and not worldPart:IsDescendantOf(model) and not worldPart:FindFirstAncestor("RagdollPortal") then
       nearby[worldPart] = true
@@ -439,7 +347,7 @@ local function CreatePortalEngine(CONFIG)
    local connection = RunService.Heartbeat:Connect(function(dt)
     if not running or not model.Parent then return end
     timer += dt
-    if timer >= OPAQUE_SCAN_INTERVAL then
+    if timer >= CONFIG.OPAQUE_SCAN_INTERVAL then
      timer = 0
      update()
     end
@@ -485,8 +393,8 @@ local function CreatePortalEngine(CONFIG)
       overlap.FilterDescendantsInstances = exclusions
       local blocked = false
       for _, obstacle in ipairs(Workspace:GetPartBoundsInBox(
-       CFrame.new(floor.Position+Vector3.yAxis*(PREDICTION_LANDING_CLEARANCE*0.5+0.15)),
-       Vector3.new(4.4,PREDICTION_LANDING_CLEARANCE,4.4),overlap)) do
+       CFrame.new(floor.Position+Vector3.yAxis*(CONFIG.PREDICTION_LANDING_CLEARANCE*0.5+0.15)),
+       Vector3.new(4.4,CONFIG.PREDICTION_LANDING_CLEARANCE,4.4),overlap)) do
        if obstacle.CanCollide and not obstacle:IsDescendantOf(model) then
         blocked=true
         break
@@ -503,7 +411,7 @@ local function CreatePortalEngine(CONFIG)
    local gravity = Vector3.new(0,-Workspace.Gravity,0)
    local previous = origin
    local segmentIndex = 0
-   for t = PREDICTION_STEP,PREDICTION_LOOKAHEAD,PREDICTION_STEP do
+   for t = CONFIG.PREDICTION_STEP,CONFIG.PREDICTION_LOOKAHEAD,CONFIG.PREDICTION_STEP do
     local future = origin+velocity*t+gravity*(0.5*t*t)
     local segment=future-previous
     segmentIndex += 1
@@ -513,7 +421,7 @@ local function CreatePortalEngine(CONFIG)
      -- volumetric checks on every single physics frame.
      if not hit and velocity.Magnitude>22 and segmentIndex%3==0 then
       local ok,swept=pcall(function()
-       return Workspace:Spherecast(previous,PREDICTION_SWEEP_RADIUS,segment,params)
+       return Workspace:Spherecast(previous,CONFIG.PREDICTION_SWEEP_RADIUS,segment,params)
       end)
       if ok then hit=swept end
      end
@@ -544,11 +452,11 @@ local function CreatePortalEngine(CONFIG)
    -- Only look for a nearby floor. A long ray can hit a lower level of the map
    -- and make the portal appear far beneath the ragdoll.
    local result = Workspace:Raycast(
-    body.Position + Vector3.new(0, GROUND_RAY_START_HEIGHT, 0),
-    Vector3.new(0, -GROUND_RAY_DISTANCE, 0),
+    body.Position + Vector3.new(0, CONFIG.GROUND_RAY_START_HEIGHT, 0),
+    Vector3.new(0, -CONFIG.GROUND_RAY_DISTANCE, 0),
     params
    )
-   if result and body.Position.Y - result.Position.Y <= MAX_GROUND_DROP then
+   if result and body.Position.Y - result.Position.Y <= CONFIG.MAX_GROUND_DROP then
     return result
    end
    return nil
@@ -566,14 +474,8 @@ local function CreatePortalEngine(CONFIG)
 
   -- MAIN portal image: preserve the existing green style by default.
   -- The two physical bubble-model ImageLabels are a separate cosmetic layer.
-  local PORTAL_IMAGE_ID = CONFIG.PORTAL_IMAGE_ID
-  local PORTAL_IMAGE_COLOR = CONFIG.PORTAL_IMAGE_COLOR
-  local PORTAL_BUBBLE_IMAGE_ID = CONFIG.PORTAL_BUBBLE_IMAGE_ID
 
   -- Gold/yellow Evil Morty-inspired palette for players flagged by the leaderboard.
-  local EVIL_MORTY_IMAGE_COLOR = CONFIG.EVIL_MORTY_IMAGE_COLOR
-  local EVIL_MORTY_ACCENT = CONFIG.EVIL_MORTY_ACCENT
-  local EVIL_MORTY_GLOW = CONFIG.EVIL_MORTY_GLOW
 
   local function IsBubbleSubtree(item, portal)
    local current = item
@@ -628,43 +530,43 @@ local function CreatePortalEngine(CONFIG)
     if item:IsA("ImageLabel") or item:IsA("ImageButton") then
      if isBubble then
       -- Keep the bubble tint/geometry as supplied in Portal.rbxm.
-      item.Image = PORTAL_BUBBLE_IMAGE_ID
+      item.Image = CONFIG.PORTAL_BUBBLE_IMAGE_ID
      elseif item:FindFirstAncestorWhichIsA("SurfaceGui") then
-      item.Image = PORTAL_IMAGE_ID
-      item.ImageColor3 = suspicious and EVIL_MORTY_IMAGE_COLOR or PORTAL_IMAGE_COLOR
+      item.Image = CONFIG.PORTAL_IMAGE_ID
+      item.ImageColor3 = suspicious and CONFIG.EVIL_MORTY_IMAGE_COLOR or CONFIG.PORTAL_IMAGE_COLOR
      end
     end
     if suspicious and not isBubble then
      if item:IsA("BasePart") then
-      item.Color = EVIL_MORTY_ACCENT
+      item.Color = CONFIG.EVIL_MORTY_ACCENT
      elseif item:IsA("PointLight") or item:IsA("SpotLight") or item:IsA("SurfaceLight") then
-      item.Color = EVIL_MORTY_GLOW
+      item.Color = CONFIG.EVIL_MORTY_GLOW
      elseif item:IsA("ParticleEmitter") or item:IsA("Beam") or item:IsA("Trail") then
       item.Color = ColorSequence.new({
-       ColorSequenceKeypoint.new(0, EVIL_MORTY_ACCENT),
-       ColorSequenceKeypoint.new(1, EVIL_MORTY_GLOW)
+       ColorSequenceKeypoint.new(0, CONFIG.EVIL_MORTY_ACCENT),
+       ColorSequenceKeypoint.new(1, CONFIG.EVIL_MORTY_GLOW)
       })
      elseif item:IsA("UIStroke") then
-      item.Color = EVIL_MORTY_ACCENT
+      item.Color = CONFIG.EVIL_MORTY_ACCENT
      elseif item:IsA("UIGradient") then
-      item.Color = ColorSequence.new(EVIL_MORTY_IMAGE_COLOR)
+      item.Color = ColorSequence.new(CONFIG.EVIL_MORTY_IMAGE_COLOR)
      elseif item:IsA("Decal") then
-      item.Color3 = EVIL_MORTY_ACCENT
+      item.Color3 = CONFIG.EVIL_MORTY_ACCENT
      elseif item:IsA("GuiObject") then
-      item.BackgroundColor3 = EVIL_MORTY_ACCENT
+      item.BackgroundColor3 = CONFIG.EVIL_MORTY_ACCENT
       if item:IsA("TextLabel") or item:IsA("TextButton") or item:IsA("TextBox") then
-       item.TextColor3 = EVIL_MORTY_IMAGE_COLOR
+       item.TextColor3 = CONFIG.EVIL_MORTY_IMAGE_COLOR
       end
      elseif item:IsA("Highlight") then
-      item.FillColor = EVIL_MORTY_ACCENT
-      item.OutlineColor = EVIL_MORTY_GLOW
+      item.FillColor = CONFIG.EVIL_MORTY_ACCENT
+      item.OutlineColor = CONFIG.EVIL_MORTY_GLOW
      elseif item:IsA("Fire") then
-      item.Color = EVIL_MORTY_ACCENT
-      item.SecondaryColor = EVIL_MORTY_GLOW
+      item.Color = CONFIG.EVIL_MORTY_ACCENT
+      item.SecondaryColor = CONFIG.EVIL_MORTY_GLOW
      elseif item:IsA("Smoke") then
-      item.Color = EVIL_MORTY_GLOW
+      item.Color = CONFIG.EVIL_MORTY_GLOW
      elseif item:IsA("Sparkles") then
-      item.SparkleColor = EVIL_MORTY_ACCENT
+      item.SparkleColor = CONFIG.EVIL_MORTY_ACCENT
      end
     end
    end
@@ -686,7 +588,7 @@ local function CreatePortalEngine(CONFIG)
    portal.Parent = Workspace
    -- Exactly one independent 1-in-50 roll per newly created portal.
    -- Rainbow supersedes its ordinary green, gold or blue theme if selected.
-   if math.random(1, RAINBOW_PORTAL_DENOMINATOR) == 1 then
+   if math.random(1, CONFIG.RAINBOW_PORTAL_DENOMINATOR) == 1 then
     StartRainbowPortal(portal)
    end
    return portal, root
@@ -728,7 +630,7 @@ local function CreatePortalEngine(CONFIG)
    if portal:GetAttribute("GroundLocked") then
     clearance = 0.035 -- visible panel almost flush with the real floor
    else
-    clearance = clearance or SURFACE_CLEARANCE
+    clearance = clearance or CONFIG.SURFACE_CLEARANCE
    end
    if not root or not root.Parent then return portal:GetPivot() end
 
@@ -750,7 +652,7 @@ local function CreatePortalEngine(CONFIG)
    local alignment = RotationBetween(FaceDirection(root, GetVisibleFace(root)), normal)
    local rotation = root.CFrame - root.CFrame.Position
    portal:PivotTo(CFrame.new(position) * alignment * rotation)
-   return AnchorPortalToSurface(portal, root, position, normal, SURFACE_CLEARANCE)
+   return AnchorPortalToSurface(portal, root, position, normal, CONFIG.SURFACE_CLEARANCE)
   end
 
   -- Reject portals embedded in nearby geometry. The contacted surface is excluded
@@ -773,9 +675,9 @@ local function CreatePortalEngine(CONFIG)
    if portal:GetAttribute("GroundLocked") then return true end
    -- Move only along the surface normal, keeping the portal visible and preventing
    -- it from being buried in walls/ceilings or overlapping unrelated parts.
-   for _ = 1, MAX_SURFACE_ADJUSTMENTS do
+   for _ = 1, CONFIG.MAX_SURFACE_ADJUSTMENTS do
     if not PortalHasObstruction(portal, ragdoll, surfacePart) then return true end
-    portal:PivotTo(portal:GetPivot() + normal.Unit*SURFACE_ADJUST_STEP)
+    portal:PivotTo(portal:GetPivot() + normal.Unit*CONFIG.SURFACE_ADJUST_STEP)
    end
    return not PortalHasObstruction(portal, ragdoll, surfacePart)
   end
@@ -789,7 +691,7 @@ local function CreatePortalEngine(CONFIG)
     pcall(function() portal:ScaleTo(from+(to-from)*eased) end)
     if surfacePosition and surfaceNormal then
      pcall(function()
-      AnchorPortalToSurface(portal, GetRoot(portal), surfacePosition, surfaceNormal, SURFACE_CLEARANCE)
+      AnchorPortalToSurface(portal, GetRoot(portal), surfacePosition, surfaceNormal, CONFIG.SURFACE_CLEARANCE)
       NudgePortalOutOfObstruction(portal, ragdoll, surfacePosition, surfaceNormal, surfacePart)
      end)
     end
@@ -802,10 +704,6 @@ local function CreatePortalEngine(CONFIG)
   -- Two Elastic-Out stages scale EVERY BasePart and its offset from the portal
   -- root, rather than stretching only the visible panel. Original geometry is
   -- snapshotted once so repeated frames never compound the scale.
-  local OPEN_STAGE_ONE, OPEN_STAGE_TWO = CONFIG.OPEN_STAGE_ONE, CONFIG.OPEN_STAGE_TWO
-  local OPEN_TINY = CONFIG.OPEN_TINY
-  local OPEN_STRETCH = CONFIG.OPEN_STRETCH
-  local OPEN_FULL = CONFIG.OPEN_FULL
 
   local function ElasticPortalIntro(portal, root, surfacePosition, surfaceNormal, surfacePart, ragdoll, dynamicTarget)
    if not portal or not portal.Parent or not root or not root.Parent then return end
@@ -868,17 +766,17 @@ local function CreatePortalEngine(CONFIG)
     end
    end
 
-   apply(OPEN_TINY)
-   stage(OPEN_TINY, OPEN_STRETCH, OPEN_STAGE_ONE)
-   stage(OPEN_STRETCH, OPEN_FULL, OPEN_STAGE_TWO)
-   apply(OPEN_FULL)
+   apply(CONFIG.OPEN_TINY)
+   stage(CONFIG.OPEN_TINY, CONFIG.OPEN_STRETCH, CONFIG.OPEN_STAGE_ONE)
+   stage(CONFIG.OPEN_STRETCH, CONFIG.OPEN_FULL, CONFIG.OPEN_STAGE_TWO)
+   apply(CONFIG.OPEN_FULL)
   end
 
   local function StartRotation(portal, base, normal)
    local angle, connection = 0, nil
    connection = RunService.Heartbeat:Connect(function(dt)
     if not portal.Parent then if connection then connection:Disconnect() end; return end
-    angle += math.rad(ROTATION_SPEED)*dt
+    angle += math.rad(CONFIG.ROTATION_SPEED)*dt
     -- Use the current pivot so surface anchoring during growth is not undone.
     local pos = portal:GetPivot().Position
     portal:PivotTo(CFrame.new(pos)*CFrame.fromAxisAngle(normal.Unit,angle)*(base-base.Position))
@@ -897,7 +795,7 @@ local function CreatePortalEngine(CONFIG)
    -- Give the ragdoll a visible hop toward the portal if it hasn't entered naturally.
    local offset = trigger.Position - body.Position
    local direction = offset.Magnitude > 0.01 and offset.Unit or Vector3.new(0, 1, 0)
-   local velocity = direction * BOUNCE_SPEED + Vector3.new(0, 18, 0)
+   local velocity = direction * CONFIG.BOUNCE_SPEED + Vector3.new(0, 18, 0)
    local seen = {}
    for _, part in ipairs(model:GetDescendants()) do
     if part:IsA("BasePart") and not part.Anchored then
@@ -918,7 +816,7 @@ local function CreatePortalEngine(CONFIG)
    params.FilterType = Enum.RaycastFilterType.Include
    params.FilterDescendantsInstances = {model}
    local start = os.clock()
-   while model.Parent and portal.Parent and not entered and os.clock()-start < ENTRY_TIMEOUT do
+   while model.Parent and portal.Parent and not entered and os.clock()-start < CONFIG.ENTRY_TIMEOUT do
     if #Workspace:GetPartBoundsInBox(trigger.CFrame, trigger.Size, params) > 0 then entered=true; break end
     if bounceAfter and not bounced and os.clock()-start >= bounceAfter then
      bounced = true
@@ -978,7 +876,7 @@ local function CreatePortalEngine(CONFIG)
 
     -- The recovery clock carries across every portal hop for this ragdoll.
     -- Only real portal entry resets it, not portal creation or prediction updates.
-    if not recovering and os.clock() - tracking.lastTeleportAt >= STUCK_TELEPORT_TIMEOUT then
+    if not recovering and os.clock() - tracking.lastTeleportAt >= CONFIG.STUCK_TELEPORT_TIMEOUT then
      recovering = true
      recoveryRestore = DisableCollision(model)
     end
@@ -993,20 +891,20 @@ local function CreatePortalEngine(CONFIG)
       -- a new portal rather than an old portal hovering inside geometry.
       local sameSurface = hit.Normal:Dot(tracking.normal) >= 0.97
        and math.abs((hit.Position-tracking.position):Dot(tracking.normal)) < 1.3
-      if not sameSurface and moved > PREDICTION_REPLAN_DISTANCE
+      if not sameSurface and moved > CONFIG.PREDICTION_REPLAN_DISTANCE
        and distanceToPlane > 3.5 and not tracking.opening then
        return finish(false) -- outer loop will re-predict / place a fresh entrance
       end
       local canAdjust = sameSurface
-       and moved > ENTRY_REPOSITION_EPSILON
-       and distanceToPlane > PREDICTION_FREEZE_HEIGHT
-       and tracking.moves < PREDICTION_MAX_REPOSITIONS
-       and os.clock() - tracking.lastMoveAt >= PREDICTION_REPOSITION_COOLDOWN
+       and moved > CONFIG.ENTRY_REPOSITION_EPSILON
+       and distanceToPlane > CONFIG.PREDICTION_FREEZE_HEIGHT
+       and tracking.moves < CONFIG.PREDICTION_MAX_REPOSITIONS
+       and os.clock() - tracking.lastMoveAt >= CONFIG.PREDICTION_REPOSITION_COOLDOWN
       if canAdjust then
        local shift = hit.Position - tracking.position
-       local available = PREDICTION_MAX_TOTAL_MOVE
+       local available = CONFIG.PREDICTION_MAX_TOTAL_MOVE
         - (tracking.position-tracking.initialPosition).Magnitude
-       local amount = math.min(shift.Magnitude, PREDICTION_MAX_STEP, available)
+       local amount = math.min(shift.Magnitude, CONFIG.PREDICTION_MAX_STEP, available)
        if amount > 0 then
         local correction = shift.Unit * amount
         tracking.position += correction
@@ -1027,8 +925,8 @@ local function CreatePortalEngine(CONFIG)
     local radialVector = relative - normal*signed
     local radial = radialVector.Magnitude
     local normalSpeed = body.AssemblyLinearVelocity:Dot(normal)
-    local captureHeight = math.max(0.6, body.Size.Y*0.50 + ENTRY_CAPTURE_MARGIN)
-    local captureRadius = ENTRY_CAPTURE_RADIUS + (recovering and STUCK_CAPTURE_EXTRA_RADIUS or 0)
+    local captureHeight = math.max(0.6, body.Size.Y*0.50 + CONFIG.ENTRY_CAPTURE_MARGIN)
+    local captureRadius = CONFIG.ENTRY_CAPTURE_RADIUS + (recovering and CONFIG.STUCK_CAPTURE_EXTRA_RADIUS or 0)
 
     -- Test intersection of the actual last-frame path with the entry plane.
     -- This is robust even at rescue speeds above 100 studs/second.
@@ -1060,7 +958,7 @@ local function CreatePortalEngine(CONFIG)
      -- If the ragdoll has drifted well outside the portal's reach, begin
      -- controlled recovery earlier than the hard 2.5s timeout. This protects
      -- trajectories deflected by other parts without snapping the model.
-     if not recovering and os.clock()-tracking.lastTeleportAt>=PREDICTION_EARLY_ASSIST_TIME
+     if not recovering and os.clock()-tracking.lastTeleportAt>=CONFIG.PREDICTION_EARLY_ASSIST_TIME
       and not tracking.opening and radial>captureRadius+2.0 then
       recovering=true
       recoveryRestore=DisableCollision(model)
@@ -1068,10 +966,10 @@ local function CreatePortalEngine(CONFIG)
     if recovering then
      -- Strong velocity-based pull toward a point BEYOND the portal plane.
      -- Not a snap/teleport: the ragdoll travels through the intervening space.
-     local target = tracking.position - normal*STUCK_PORTAL_OVERSHOOT
+     local target = tracking.position - normal*CONFIG.STUCK_PORTAL_OVERSHOOT
      local displacement = target - current
      if displacement.Magnitude > 0.05 then
-      SetRagdollVelocity(model, displacement.Unit * STUCK_PULL_SPEED)
+      SetRagdollVelocity(model, displacement.Unit * CONFIG.STUCK_PULL_SPEED)
      end
     end
     previousPosition = current
@@ -1093,16 +991,16 @@ local function CreatePortalEngine(CONFIG)
    params.IgnoreWater = true
    params.RespectCanCollide = true
    local bestHit, bestScore
-   for _ = 1, CAMERA_VISIBLE_ATTEMPTS do
-    local x = fluidRandom:NextNumber(CAMERA_VIEW_MARGIN, 1-CAMERA_VIEW_MARGIN) * viewport.X
-    local y = fluidRandom:NextNumber(CAMERA_VIEW_MARGIN, 1-CAMERA_VIEW_MARGIN) * viewport.Y
+   for _ = 1, CONFIG.CAMERA_VISIBLE_ATTEMPTS do
+    local x = fluidRandom:NextNumber(CONFIG.CAMERA_VIEW_MARGIN, 1-CONFIG.CAMERA_VIEW_MARGIN) * viewport.X
+    local y = fluidRandom:NextNumber(CONFIG.CAMERA_VIEW_MARGIN, 1-CONFIG.CAMERA_VIEW_MARGIN) * viewport.Y
     local ray = camera:ViewportPointToRay(x, y)
-    local hit = Workspace:Raycast(ray.Origin, ray.Direction * CAMERA_RAY_LENGTH, params)
+    local hit = Workspace:Raycast(ray.Origin, ray.Direction * CONFIG.CAMERA_RAY_LENGTH, params)
     if hit and hit.Instance and hit.Instance:IsA("BasePart") and hit.Position.Y >= minimumY then
      local distanceToBody = (hit.Position-body.Position).Magnitude
      local distanceToCamera = (hit.Position-camera.CFrame.Position).Magnitude
      -- Keep exits near enough to the ragdoll to preserve the recursive sequence.
-     if distanceToBody <= EXIT_SEARCH_RADIUS * 2.5 and distanceToCamera <= CAMERA_MAX_EXIT_DISTANCE then
+     if distanceToBody <= CONFIG.EXIT_SEARCH_RADIUS * 2.5 and distanceToCamera <= CONFIG.CAMERA_MAX_EXIT_DISTANCE then
       -- Prefer nearby visible surfaces, with a slight preference for screen center.
       local centerPenalty = ((x/viewport.X-0.5)^2+(y/viewport.Y-0.5)^2)*12
       local score = distanceToBody + centerPenalty
@@ -1117,7 +1015,7 @@ local function CreatePortalEngine(CONFIG)
   end
 
   local function RandomExit(model, body, minimumY)
-   if CAMERA_AWARE_EXITS then
+   if CONFIG.CAMERA_AWARE_EXITS then
     local pos, normal, part = CameraVisibleExit(model, body, minimumY)
     if pos then return pos, normal, part end
    end
@@ -1126,9 +1024,9 @@ local function CreatePortalEngine(CONFIG)
    params.FilterDescendantsInstances = {model}
    params.IgnoreWater = true
    local dirs = {Vector3.new(0,-1,0),Vector3.new(0,1,0),Vector3.new(1,0,0),Vector3.new(-1,0,0),Vector3.new(0,0,1),Vector3.new(0,0,-1)}
-   for _ = 1, EXIT_CANDIDATE_ATTEMPTS do
+   for _ = 1, CONFIG.EXIT_CANDIDATE_ATTEMPTS do
     local dir = dirs[math.random(1,#dirs)]
-    local offset = Vector3.new(math.random(-EXIT_SEARCH_RADIUS,EXIT_SEARCH_RADIUS),math.random(-4,12),math.random(-EXIT_SEARCH_RADIUS,EXIT_SEARCH_RADIUS))
+    local offset = Vector3.new(math.random(-CONFIG.EXIT_SEARCH_RADIUS,CONFIG.EXIT_SEARCH_RADIUS),math.random(-4,12),math.random(-CONFIG.EXIT_SEARCH_RADIUS,CONFIG.EXIT_SEARCH_RADIUS))
     local origin = body.Position + offset + dir*14
     local hit = Workspace:Raycast(origin,-dir*28,params)
     if hit and hit.Position.Y >= minimumY then
@@ -1142,13 +1040,13 @@ local function CreatePortalEngine(CONFIG)
 
   local function ActuallyClosePortal(portal)
    if not portal or not portal.Parent then return end
-   PlayPortalSound(AUDIO.Close, portal)
+   PlayPortalSound(CONFIG.AUDIO.Close, portal)
    local fluidRoot = GetRoot(portal)
    local fluidFrame = fluidRoot and fluidRoot.CFrame
    local fluidSize = fluidRoot and fluidRoot.Size
    local fluidLight = portal:FindFirstChildWhichIsA("PointLight", true)
    local fluidColor = fluidLight and fluidLight.Color or Color3.fromRGB(26,255,0)
-   ScalePortal(portal,FINAL_SCALE,END_SCALE,SHRINK_TIME)
+   ScalePortal(portal,CONFIG.FINAL_SCALE,CONFIG.END_SCALE,CONFIG.SHRINK_TIME)
    if fluidFrame and fluidSize then
     EmitPortalClosingFluid(fluidFrame, fluidSize, fluidColor)
    end
@@ -1173,7 +1071,7 @@ local function CreatePortalEngine(CONFIG)
       item.CanQuery = false
      end
     end
-    task.delay(RAINBOW_PORTAL_LINGER, function()
+    task.delay(CONFIG.RAINBOW_PORTAL_LINGER, function()
      if portal.Parent then ActuallyClosePortal(portal) end
     end)
     return
@@ -1188,7 +1086,7 @@ local function CreatePortalEngine(CONFIG)
    local base = PlacePortal(portal,root,pos,normal)
    if surfacePart then NudgePortalOutOfObstruction(portal,model,pos,normal,surfacePart) end
    base = portal:GetPivot()
-   PlayPortalSound(AUDIO.Open, portal)
+   PlayPortalSound(CONFIG.AUDIO.Open, portal)
    task.spawn(function()
     ElasticPortalIntro(portal,root, surfacePart and pos or nil, surfacePart and normal or nil, surfacePart, model)
    end)
@@ -1228,13 +1126,13 @@ local function CreatePortalEngine(CONFIG)
     return hit == nil
    end
 
-   local tries = airOnly and AIR_ONLY_MAX_SPAWN_ATTEMPTS or 12
+   local tries = airOnly and CONFIG.AIR_ONLY_MAX_SPAWN_ATTEMPTS or 12
    local chosen
    for _ = 1, tries do
-    local separation = fluidRandom:NextNumber(MIDAIR_SPACING_MIN, MIDAIR_SPACING_MAX)
+    local separation = fluidRandom:NextNumber(CONFIG.MIDAIR_SPACING_MIN, CONFIG.MIDAIR_SPACING_MAX)
     local direction = right * fluidRandom:NextNumber(-1, 1)
-     + up * fluidRandom:NextNumber(-MIDAIR_DIRECTION_VERTICALITY, MIDAIR_DIRECTION_VERTICALITY)
-     + forward * fluidRandom:NextNumber(-MIDAIR_DIRECTION_DEPTH, MIDAIR_DIRECTION_DEPTH)
+     + up * fluidRandom:NextNumber(-CONFIG.MIDAIR_DIRECTION_VERTICALITY, CONFIG.MIDAIR_DIRECTION_VERTICALITY)
+     + forward * fluidRandom:NextNumber(-CONFIG.MIDAIR_DIRECTION_DEPTH, CONFIG.MIDAIR_DIRECTION_DEPTH)
     if direction.Magnitude < 0.20 then direction = right end
     direction = direction.Unit
     local center
@@ -1250,15 +1148,15 @@ local function CreatePortalEngine(CONFIG)
     local p2 = center + direction * separation*0.5
     local normal1, normal2 = direction, -direction
     local wall1, wall2 = nil, nil
-    if fluidRandom:NextNumber() < MIDAIR_WALL_ATTACH_CHANCE then
+    if fluidRandom:NextNumber() < CONFIG.MIDAIR_WALL_ATTACH_CHANCE then
      -- Search BEHIND the first portal (outward normal must face the flight).
-     local hit1 = Workspace:Raycast(p1, -direction * MIDAIR_WALL_SEARCH_DISTANCE, params)
+     local hit1 = Workspace:Raycast(p1, -direction * CONFIG.MIDAIR_WALL_SEARCH_DISTANCE, params)
      if hit1 and hit1.Instance:IsA("BasePart")
       and math.abs(hit1.Normal.Y) < 0.45 and hit1.Normal:Dot(direction) > 0.68 then
       p1, normal1, wall1 = hit1.Position, hit1.Normal, hit1.Instance
      end
      -- Search AHEAD of the destination. Its normal faces the incoming ragdoll.
-     local hit2 = Workspace:Raycast(p2, direction * MIDAIR_WALL_SEARCH_DISTANCE, params)
+     local hit2 = Workspace:Raycast(p2, direction * CONFIG.MIDAIR_WALL_SEARCH_DISTANCE, params)
      if hit2 and hit2.Instance:IsA("BasePart")
       and math.abs(hit2.Normal.Y) < 0.45 and hit2.Normal:Dot(-direction) > 0.68 then
       p2, normal2, wall2 = hit2.Position, hit2.Normal, hit2.Instance
@@ -1266,7 +1164,7 @@ local function CreatePortalEngine(CONFIG)
     end
     local newTravel = p2-p1
     local flightDistance = newTravel.Magnitude
-    if flightDistance >= MIDAIR_SPACING_MIN and flightDistance <= MIDAIR_SPACING_MAX + MIDAIR_WALL_SEARCH_DISTANCE*2
+    if flightDistance >= CONFIG.MIDAIR_SPACING_MIN and flightDistance <= CONFIG.MIDAIR_SPACING_MAX + CONFIG.MIDAIR_WALL_SEARCH_DISTANCE*2
      and onScreen(p1) and onScreen(p2)
      and visibleToCamera(p1 + normal1 * 0.5)
      and visibleToCamera(p2 + normal2 * 0.5) then
@@ -1293,7 +1191,7 @@ local function CreatePortalEngine(CONFIG)
    for _, entry in ipairs({{first,firstRoot},{second,secondRoot}}) do
     task.spawn(function()
      if not entry[1].Parent then return end
-     PlayPortalSound(AUDIO.Open, entry[1])
+     PlayPortalSound(CONFIG.AUDIO.Open, entry[1])
      ElasticPortalIntro(entry[1], entry[2])
     end)
    end
@@ -1312,7 +1210,7 @@ local function CreatePortalEngine(CONFIG)
    local length = travel.Magnitude
    if length < 0.01 then return false end
    local forward = travel / length
-   local speed = length / MIDAIR_FLIGHT_TIME
+   local speed = length / CONFIG.MIDAIR_FLIGHT_TIME
 
    -- Teleport from the ground entrance INTO the first airborne opening.
    -- Align the torso rather than the model pivot (which can be offset by limbs).
@@ -1323,7 +1221,7 @@ local function CreatePortalEngine(CONFIG)
    local previousAlong = (previousPosition-secondPos):Dot(forward)
    local started = os.clock()
    while model.Parent and body.Parent and (not flow or not flow.finalizing)
-    and os.clock()-started < MIDAIR_MAX_WAIT do
+    and os.clock()-started < CONFIG.MIDAIR_MAX_WAIT do
     RunService.Heartbeat:Wait()
     if not model.Parent or not body.Parent or (flow and flow.finalizing) then break end
     local position = body.Position
@@ -1337,7 +1235,7 @@ local function CreatePortalEngine(CONFIG)
      local crossedAt = previousPosition:Lerp(position, fraction)
      local offset = crossedAt - secondPos
      local lateralAtCrossing = (offset-forward*offset:Dot(forward)).Magnitude
-     if lateralAtCrossing <= MIDAIR_ARRIVAL_RADIUS then
+     if lateralAtCrossing <= CONFIG.MIDAIR_ARRIVAL_RADIUS then
       return true
      end
     end
@@ -1348,9 +1246,9 @@ local function CreatePortalEngine(CONFIG)
     -- Correct ONLY sideways drift, not forward speed or limb rotation.
     local progress = math.clamp((position-firstPos):Dot(forward), 0, length)
     local closest = firstPos + forward*progress
-    local correction = (closest-position)*MIDAIR_STRAIGHT_STEERING
-    if correction.Magnitude > MIDAIR_MAX_STEERING_SPEED then
-     correction = correction.Unit * MIDAIR_MAX_STEERING_SPEED
+    local correction = (closest-position)*CONFIG.MIDAIR_STRAIGHT_STEERING
+    if correction.Magnitude > CONFIG.MIDAIR_MAX_STEERING_SPEED then
+     correction = correction.Unit * CONFIG.MIDAIR_MAX_STEERING_SPEED
     end
     SetRagdollVelocity(model, forward*speed + correction)
    end
@@ -1368,27 +1266,27 @@ local function CreatePortalEngine(CONFIG)
    for _, item in ipairs(portal:GetDescendants()) do
     if not IsBubbleSubtree(item, portal) then
      if item:IsA("ImageLabel") or item:IsA("ImageButton") then
-      item.ImageColor3 = BLUE_PORTAL_COLOR
+      item.ImageColor3 = CONFIG.BLUE_PORTAL_COLOR
      elseif item:IsA("BasePart") then
-      item.Color = BLUE_PORTAL_COLOR
+      item.Color = CONFIG.BLUE_PORTAL_COLOR
      elseif item:IsA("PointLight") or item:IsA("SpotLight") or item:IsA("SurfaceLight") then
-      item.Color = BLUE_PORTAL_GLOW
+      item.Color = CONFIG.BLUE_PORTAL_GLOW
      elseif item:IsA("ParticleEmitter") or item:IsA("Beam") or item:IsA("Trail") then
-      item.Color = ColorSequence.new(BLUE_PORTAL_COLOR)
+      item.Color = ColorSequence.new(CONFIG.BLUE_PORTAL_COLOR)
      elseif item:IsA("Decal") then
-      item.Color3 = BLUE_PORTAL_COLOR
+      item.Color3 = CONFIG.BLUE_PORTAL_COLOR
      elseif item:IsA("UIStroke") then
-      item.Color = BLUE_PORTAL_GLOW
+      item.Color = CONFIG.BLUE_PORTAL_GLOW
      elseif item:IsA("UIGradient") then
-      item.Color = ColorSequence.new(BLUE_PORTAL_COLOR)
+      item.Color = ColorSequence.new(CONFIG.BLUE_PORTAL_COLOR)
      elseif item:IsA("GuiObject") then
-      item.BackgroundColor3 = BLUE_PORTAL_COLOR
+      item.BackgroundColor3 = CONFIG.BLUE_PORTAL_COLOR
      elseif item:IsA("Fire") then
-      item.Color, item.SecondaryColor = BLUE_PORTAL_COLOR, BLUE_PORTAL_GLOW
+      item.Color, item.SecondaryColor = CONFIG.BLUE_PORTAL_COLOR, CONFIG.BLUE_PORTAL_GLOW
      elseif item:IsA("Smoke") then
-      item.Color = BLUE_PORTAL_COLOR
+      item.Color = CONFIG.BLUE_PORTAL_COLOR
      elseif item:IsA("Sparkles") then
-      item.SparkleColor = BLUE_PORTAL_COLOR
+      item.SparkleColor = CONFIG.BLUE_PORTAL_COLOR
      end
     end
    end
@@ -1418,7 +1316,7 @@ local function CreatePortalEngine(CONFIG)
    end
    task.spawn(function()
     while portal.Parent and portal:GetAttribute("RainbowPortal") do
-     local baseHue=(os.clock()*RAINBOW_PORTAL_HUE_SPEED)%1
+     local baseHue=(os.clock()*CONFIG.RAINBOW_PORTAL_HUE_SPEED)%1
      for i,item in ipairs(colored) do
       if item.Parent then
        local color=Color3.fromHSV((baseHue+(i-1)*0.13)%1,0.95,1)
@@ -1450,7 +1348,7 @@ local function CreatePortalEngine(CONFIG)
        end
       end
      end
-     task.wait(RAINBOW_COLOR_UPDATE)
+     task.wait(CONFIG.RAINBOW_COLOR_UPDATE)
     end
    end)
   end
@@ -1480,7 +1378,7 @@ local function CreatePortalEngine(CONFIG)
       end
       nextRefresh=now+1.3
      end
-     local hue=(now*RAINBOW_RAGDOLL_HUE_SPEED)%1
+     local hue=(now*CONFIG.RAINBOW_RAGDOLL_HUE_SPEED)%1
      for i,part in ipairs(colored) do
       if part.Parent and not model:GetAttribute("BombCharred") then
        local color=Color3.fromHSV((hue+(i-1)*0.115)%1,0.92,1)
@@ -1488,7 +1386,7 @@ local function CreatePortalEngine(CONFIG)
        elseif part:IsA("Decal") then part.Color3=color end
       end
      end
-     task.wait(RAINBOW_COLOR_UPDATE)
+     task.wait(CONFIG.RAINBOW_COLOR_UPDATE)
     end
     rainbowRagdollRunning[model]=nil
    end)
@@ -1498,7 +1396,7 @@ local function CreatePortalEngine(CONFIG)
    return model and model.Parent and not flow.finalizing
     and not model:GetAttribute("BombCharred")
     and not model:GetAttribute("BlueLoopUsed")
-    and math.random()<BLUE_LOOP_CHANCE
+    and math.random()<CONFIG.BLUE_LOOP_CHANCE
   end
   -- END RAINBOW PORTALS -----------------------------------------------------
 
@@ -1534,9 +1432,9 @@ local function CreatePortalEngine(CONFIG)
     local p = body.Position + Vector3.new(offset.X,0,offset.Z)
     local floor = Workspace:Raycast(p+Vector3.yAxis*6,-Vector3.yAxis*50,params)
     local lowerPos = floor and floor.Normal.Y > 0.8 and floor.Position or p-Vector3.yAxis*3
-    local upperPos = lowerPos+Vector3.yAxis*BLUE_LOOP_HEIGHT
+    local upperPos = lowerPos+Vector3.yAxis*CONFIG.BLUE_LOOP_HEIGHT
     local corridorHit = Workspace:Raycast(lowerPos+Vector3.yAxis*0.8,
-     Vector3.yAxis*(BLUE_LOOP_HEIGHT-1.6),params)
+     Vector3.yAxis*(CONFIG.BLUE_LOOP_HEIGHT-1.6),params)
     if not corridorHit then
      local score = 0
      if cam then
@@ -1568,14 +1466,14 @@ local function CreatePortalEngine(CONFIG)
     low:SetAttribute("GroundLocked", true)
    end
    PlacePortal(low,lowRoot,bestPos,Vector3.yAxis)
-   PlacePortal(high,highRoot,bestPos+Vector3.yAxis*BLUE_LOOP_HEIGHT,-Vector3.yAxis)
+   PlacePortal(high,highRoot,bestPos+Vector3.yAxis*CONFIG.BLUE_LOOP_HEIGHT,-Vector3.yAxis)
    for _, entry in ipairs({{low,lowRoot},{high,highRoot}}) do
     task.spawn(function()
-     PlayPortalSound(AUDIO.Open,entry[1])
+     PlayPortalSound(CONFIG.AUDIO.Open,entry[1])
      ElasticPortalIntro(entry[1],entry[2])
     end)
    end
-   return low,high,bestPos,bestPos+Vector3.yAxis*BLUE_LOOP_HEIGHT,highRoot
+   return low,high,bestPos,bestPos+Vector3.yAxis*CONFIG.BLUE_LOOP_HEIGHT,highRoot
   end
 
   -- Guaranteed visual continuation after the blue prototype's final sideways
@@ -1583,7 +1481,7 @@ local function CreatePortalEngine(CONFIG)
   -- detects real plane crossing, then uses the usual camera-aware exit portal.
   local function SpawnBlueReturnEntrance(model,side,startPosition)
    local forward=side.Unit
-   local desired=startPosition+forward*BLUE_RETURN_DISTANCE+Vector3.yAxis*0.4
+   local desired=startPosition+forward*CONFIG.BLUE_RETURN_DISTANCE+Vector3.yAxis*0.4
    local params=RaycastParams.new()
    params.FilterType=Enum.RaycastFilterType.Exclude
    local ignore={model,RAGDOLLS_FOLDER,fluidFolder}
@@ -1597,13 +1495,13 @@ local function CreatePortalEngine(CONFIG)
    local obstacle=Workspace:Raycast(startPosition,desired-startPosition,params)
    if obstacle then
     local gap=(obstacle.Position-startPosition).Magnitude
-    desired=startPosition+forward*math.max(4,math.min(BLUE_RETURN_DISTANCE,gap-2))
+    desired=startPosition+forward*math.max(4,math.min(CONFIG.BLUE_RETURN_DISTANCE,gap-2))
    end
    local portal,root=CreatePortal(model)
    if not portal then return nil end
    portal.Name="BlueLoopReturnEntrance"
    PlacePortal(portal,root,desired,-forward)
-   PlayPortalSound(AUDIO.Open,portal)
+   PlayPortalSound(CONFIG.AUDIO.Open,portal)
    task.spawn(ElasticPortalIntro,portal,root)
    return portal,desired
   end
@@ -1629,7 +1527,7 @@ local function CreatePortalEngine(CONFIG)
    local previous=body.Position
    local caught=false
    while model.Parent and entrance.Parent and not flow.finalizing
-    and not model:GetAttribute("BombCharred") and os.clock()-started<BLUE_RETURN_TIMEOUT do
+    and not model:GetAttribute("BombCharred") and os.clock()-started<CONFIG.BLUE_RETURN_TIMEOUT do
     RunService.Heartbeat:Wait()
     body=GetBodyPart(model)
     if not body then break end
@@ -1644,7 +1542,7 @@ local function CreatePortalEngine(CONFIG)
     end
     local localOffset=hitPoint-desired
     local radial=(localOffset-forward*localOffset:Dot(forward)).Magnitude
-    if radial<=BLUE_RETURN_CAPTURE_RADIUS and (crossing or after<=0.7) then
+    if radial<=CONFIG.BLUE_RETURN_CAPTURE_RADIUS and (crossing or after<=0.7) then
      caught=true
      break
     end
@@ -1654,12 +1552,12 @@ local function CreatePortalEngine(CONFIG)
     local lateral=target-current-forward*(target-current):Dot(forward)
     local assist=lateral*8
     if assist.Magnitude>38 then assist=assist.Unit*38 end
-    SetRagdollVelocity(model,forward*math.max(BLUE_LOOP_SIDE_LAUNCH,105)+assist)
+    SetRagdollVelocity(model,forward*math.max(CONFIG.BLUE_LOOP_SIDE_LAUNCH,105)+assist)
     previous=current
    end
    restore()
    if caught and model.Parent and not flow.finalizing then
-    PlayPortalSound(AUDIO.Enter,entrance)
+    PlayPortalSound(CONFIG.AUDIO.Enter,entrance)
     local bodyNow=GetBodyPart(model) or body
     local exit,stopExit,exitPos,exitNormal=SpawnExit(model,bodyNow,-math.huge)
     local rainbowReturn = entrance:GetAttribute("RainbowPortal")
@@ -1671,10 +1569,10 @@ local function CreatePortalEngine(CONFIG)
      SetRagdollVelocity(model,exitNormal*math.random(40,68)
       +Vector3.new(math.random(-16,16),math.random(8,25),math.random(-16,16)))
      noCollision()
-     PlayPortalSound(AUDIO.Enter,exit)
+     PlayPortalSound(CONFIG.AUDIO.Enter,exit)
      if rainbowReturn then StartRainbowRagdoll(model) end
      flow.lastTeleportAt=os.clock()
-     task.delay(LINGER_TIME,function()
+     task.delay(CONFIG.LINGER_TIME,function()
       if exit.Parent then ClosePortal(exit,stopExit) end
      end)
      task.spawn(ClosePortal,entrance,nil)
@@ -1704,16 +1602,16 @@ local function CreatePortalEngine(CONFIG)
    end
    -- Allow both portals to finish their original two-stage elastic opening.
    local openedAt=os.clock()
-   while active() and os.clock()-openedAt < OPEN_STAGE_ONE+OPEN_STAGE_TWO do
+   while active() and os.clock()-openedAt < CONFIG.OPEN_STAGE_ONE+CONFIG.OPEN_STAGE_TWO do
     RunService.Heartbeat:Wait()
    end
    if not active() then cleanup(); return false end
    restoreCollision=DisableCollision(model)
-   local count=math.random(BLUE_LOOP_MIN_FALLS,BLUE_LOOP_MAX_FALLS)
+   local count=math.random(CONFIG.BLUE_LOOP_MIN_FALLS,CONFIG.BLUE_LOOP_MAX_FALLS)
    local initialBody=GetBodyPart(model)
    if not initialBody then cleanup(); return false end
    model:PivotTo(model:GetPivot()+(highPos-Vector3.yAxis*2-initialBody.Position))
-   local downSpeed=BLUE_LOOP_START_SPEED
+   local downSpeed=CONFIG.BLUE_LOOP_START_SPEED
    SetRagdollVelocity(model,-Vector3.yAxis*downSpeed)
    local completed=0
    local finalSide,finalReturnPortal,finalReturnPosition
@@ -1724,7 +1622,7 @@ local function CreatePortalEngine(CONFIG)
     local previous=body.Position
     local reached=false
     local passStarted=os.clock()
-    while active() and body.Parent and os.clock()-passStarted < BLUE_LOOP_MAX_PASS_TIME do
+    while active() and body.Parent and os.clock()-passStarted < CONFIG.BLUE_LOOP_MAX_PASS_TIME do
      RunService.Heartbeat:Wait()
      if not active() then break end
      local current=body.Position
@@ -1734,13 +1632,13 @@ local function CreatePortalEngine(CONFIG)
       local alpha=math.clamp((previous.Y-planeY)/math.max(previous.Y-current.Y,0.001),0,1)
       local point=previous:Lerp(current,alpha)
       horizontal=(Vector3.new(point.X,0,point.Z)-Vector3.new(lowPos.X,0,lowPos.Z)).Magnitude
-      if horizontal <= BLUE_LOOP_CAPTURE_RADIUS then reached=true; break end
+      if horizontal <= CONFIG.BLUE_LOOP_CAPTURE_RADIUS then reached=true; break end
      end
      -- A predictable X/Z corridor, with real gravity acting on the Y velocity.
      local planar=Vector3.new(lowPos.X-current.X,0,lowPos.Z-current.Z)
      if planar.Magnitude>0.06 then
       local velocity=body.AssemblyLinearVelocity
-      local steer=planar*BLUE_LOOP_STEERING
+      local steer=planar*CONFIG.BLUE_LOOP_STEERING
       if steer.Magnitude > 38 then steer=steer.Unit*38 end
       SetRagdollVelocity(model,Vector3.new(steer.X,velocity.Y,steer.Z))
      end
@@ -1749,17 +1647,17 @@ local function CreatePortalEngine(CONFIG)
     if not reached or not active() then break end
     completed += 1
     flow.lastTeleportAt=os.clock() -- a genuine crossing resets the 5s watchdog
-    PlayPortalSound(AUDIO.Enter,low)
+    PlayPortalSound(CONFIG.AUDIO.Enter,low)
     if low:GetAttribute("RainbowPortal") or high:GetAttribute("RainbowPortal") then
      StartRainbowRagdoll(model)
     end
-    downSpeed=math.min(BLUE_LOOP_MAX_SPEED,downSpeed+BLUE_LOOP_SPEED_GAIN)
+    downSpeed=math.min(CONFIG.BLUE_LOOP_MAX_SPEED,downSpeed+CONFIG.BLUE_LOOP_SPEED_GAIN)
     if pass < count then
      local torso=GetBodyPart(model)
      if not torso then break end
      model:PivotTo(model:GetPivot()+(highPos-Vector3.yAxis*2-torso.Position))
      SetRagdollVelocity(model,-Vector3.yAxis*downSpeed)
-     PlayPortalSound(AUDIO.Enter,high)
+     PlayPortalSound(CONFIG.AUDIO.Enter,high)
     else
      -- Final pass: upper opening visibly turns sideways, then ejects horizontally.
      local camera=Workspace.CurrentCamera
@@ -1786,8 +1684,8 @@ local function CreatePortalEngine(CONFIG)
      local torso=GetBodyPart(model)
      if not torso then break end
      model:PivotTo(model:GetPivot()+(highPos+side*2.4-torso.Position))
-     SetRagdollVelocity(model,side*math.max(BLUE_LOOP_SIDE_LAUNCH,downSpeed*1.1)+Vector3.yAxis*14)
-     PlayPortalSound(AUDIO.Enter,high)
+     SetRagdollVelocity(model,side*math.max(CONFIG.BLUE_LOOP_SIDE_LAUNCH,downSpeed*1.1)+Vector3.yAxis*14)
+     PlayPortalSound(CONFIG.AUDIO.Enter,high)
      flow.lastTeleportAt=os.clock()
      finalSide=side
     end
@@ -1849,7 +1747,7 @@ local function CreatePortalEngine(CONFIG)
 
 
   local function EmitPortalBloodBurst(frame, size, direction, color, count)
-   color = color or FINAL_BLOOD_COLOR
+   color = color or CONFIG.FINAL_BLOOD_COLOR
    direction = (typeof(direction) == "Vector3" and direction.Magnitude > 0.001) and direction.Unit or Vector3.new(0, 0, 1)
    size = typeof(size) == "Vector3" and size or Vector3.new(8, 8.5, 0.1)
    local rx = math.max(size.X * 0.36, 0.5)
@@ -1869,8 +1767,8 @@ local function CreatePortalEngine(CONFIG)
    while portal.Parent and os.clock() - started < duration do
     root = GetRoot(portal)
     if not root then break end
-    EmitPortalBloodBurst(root.CFrame, root.Size, root.CFrame.LookVector, FINAL_BLOOD_COLOR, 4)
-    task.wait(FINAL_SHAKE_BLOOD_INTERVAL)
+    EmitPortalBloodBurst(root.CFrame, root.Size, root.CFrame.LookVector, CONFIG.FINAL_BLOOD_COLOR, 4)
+    task.wait(CONFIG.FINAL_SHAKE_BLOOD_INTERVAL)
    end
   end
 
@@ -1917,21 +1815,21 @@ local function CreatePortalEngine(CONFIG)
   end
 
   local function StartBlenderExitFluid(model, sites, allowCharred, duration)
-   if not BLENDER_EXIT_FLUID or #sites == 0 then return end
+   if not CONFIG.BLENDER_EXIT_FLUID or #sites == 0 then return end
    task.spawn(function()
     local began = os.clock()
     while model.Parent and (allowCharred or not model:GetAttribute("BombCharred"))
-     and os.clock() - began < (duration or BLENDER_EXIT_FLUID_DURATION) do
+     and os.clock() - began < (duration or CONFIG.BLENDER_EXIT_FLUID_DURATION) do
      for _, site in ipairs(sites) do
       if site.Parent and site:IsDescendantOf(model) then
        local parent = site.Parent
        local velocity = parent.AssemblyLinearVelocity
        local direction = Vector3.new(math.random(-6,6)*0.12, 0.65, math.random(-6,6)*0.12)
        if velocity.Magnitude > 1 then direction += velocity.Unit*0.30 end
-       SpawnFluidDrop(site.WorldPosition, direction.Unit, BLENDER_EXIT_FLUID_COLOR)
+       SpawnFluidDrop(site.WorldPosition, direction.Unit, CONFIG.BLENDER_EXIT_FLUID_COLOR)
       end
      end
-     task.wait(BLENDER_EXIT_FLUID_INTERVAL)
+     task.wait(CONFIG.BLENDER_EXIT_FLUID_INTERVAL)
     end
     for _, site in ipairs(sites) do
      if site.Parent then site:Destroy() end
@@ -1955,7 +1853,7 @@ local function CreatePortalEngine(CONFIG)
     end
    end
    if #limbCandidates == 0 then return {} end
-   local count = math.min(#limbCandidates, math.random(FINAL_TEAROFF_MIN,FINAL_TEAROFF_MAX))
+   local count = math.min(#limbCandidates, math.random(CONFIG.FINAL_TEAROFF_MIN,CONFIG.FINAL_TEAROFF_MAX))
    outward = outward and outward.Magnitude > 0.01 and outward.Unit or Vector3.new(1,0,0)
    local connectionRecords = {}
    for _ = 1, count do
@@ -1987,7 +1885,7 @@ local function CreatePortalEngine(CONFIG)
       piece.AssemblyLinearVelocity = outward * math.random(45,88)
         + Vector3.new(math.random(-30,30),math.random(16,42),math.random(-30,30))
       piece.AssemblyAngularVelocity = Vector3.new(math.random(-25,25),math.random(-25,25),math.random(-25,25))
-      Debris:AddItem(piece, FINAL_RAGDOLL_CLEANUP_DELAY)
+      Debris:AddItem(piece, CONFIG.FINAL_RAGDOLL_CLEANUP_DELAY)
      end
      chosen:Destroy()
     end
@@ -2057,8 +1955,6 @@ local function CreatePortalEngine(CONFIG)
 
   -- All terminal portals override the yellow suspicious-player theme.
   -- The front/back bubble image tints are intentionally left alone.
-  local TERMINAL_GREEN = CONFIG.TERMINAL_GREEN
-  local TERMINAL_GREEN_DIM = CONFIG.TERMINAL_GREEN_DIM
   local function MakeTerminalPortalGreen(portal)
    -- The one-in-fifty rainbow roll also applies to either terminal portal.
    if portal:GetAttribute("RainbowPortal") then return end
@@ -2067,22 +1963,22 @@ local function CreatePortalEngine(CONFIG)
    for _, item in ipairs(portal:GetDescendants()) do
     if not IsBubbleSubtree(item,portal) then
      if item:IsA("ImageLabel") or item:IsA("ImageButton") then
-      item.ImageColor3 = TERMINAL_GREEN_DIM
-     elseif item:IsA("BasePart") then item.Color = TERMINAL_GREEN_DIM
+      item.ImageColor3 = CONFIG.TERMINAL_GREEN_DIM
+     elseif item:IsA("BasePart") then item.Color = CONFIG.TERMINAL_GREEN_DIM
      elseif item:IsA("PointLight") or item:IsA("SpotLight") or item:IsA("SurfaceLight") then
-      item.Color = TERMINAL_GREEN
+      item.Color = CONFIG.TERMINAL_GREEN
      elseif item:IsA("ParticleEmitter") or item:IsA("Beam") or item:IsA("Trail") then
-      item.Color = ColorSequence.new(TERMINAL_GREEN)
-     elseif item:IsA("UIStroke") then item.Color = TERMINAL_GREEN
-     elseif item:IsA("UIGradient") then item.Color = ColorSequence.new(TERMINAL_GREEN_DIM)
-     elseif item:IsA("Decal") then item.Color3 = TERMINAL_GREEN_DIM
-     elseif item:IsA("GuiObject") then item.BackgroundColor3 = TERMINAL_GREEN_DIM
+      item.Color = ColorSequence.new(CONFIG.TERMINAL_GREEN)
+     elseif item:IsA("UIStroke") then item.Color = CONFIG.TERMINAL_GREEN
+     elseif item:IsA("UIGradient") then item.Color = ColorSequence.new(CONFIG.TERMINAL_GREEN_DIM)
+     elseif item:IsA("Decal") then item.Color3 = CONFIG.TERMINAL_GREEN_DIM
+     elseif item:IsA("GuiObject") then item.BackgroundColor3 = CONFIG.TERMINAL_GREEN_DIM
      elseif item:IsA("Highlight") then
-      item.FillColor, item.OutlineColor = TERMINAL_GREEN_DIM, TERMINAL_GREEN
+      item.FillColor, item.OutlineColor = CONFIG.TERMINAL_GREEN_DIM, CONFIG.TERMINAL_GREEN
      elseif item:IsA("Fire") then
-      item.Color, item.SecondaryColor = TERMINAL_GREEN_DIM, TERMINAL_GREEN
-     elseif item:IsA("Smoke") then item.Color = TERMINAL_GREEN_DIM
-     elseif item:IsA("Sparkles") then item.SparkleColor = TERMINAL_GREEN
+      item.Color, item.SecondaryColor = CONFIG.TERMINAL_GREEN_DIM, CONFIG.TERMINAL_GREEN
+     elseif item:IsA("Smoke") then item.Color = CONFIG.TERMINAL_GREEN_DIM
+     elseif item:IsA("Sparkles") then item.SparkleColor = CONFIG.TERMINAL_GREEN
      end
     end
    end
@@ -2336,9 +2232,9 @@ local function CreatePortalEngine(CONFIG)
   end
 
   local primeExplosionTemplate = MakePrimeVfxTemplate(
-   "PrimeBombExplosion",PRIME_BOMB_EXPLOSION_FILE,explosionEmitterSpecs)
+   "PrimeBombExplosion",CONFIG.PRIME_BOMB_EXPLOSION_FILE,explosionEmitterSpecs)
   local primeAuraTemplate = MakePrimeVfxTemplate(
-   "PrimeBombDeathAura",PRIME_BOMB_DEATH_AURA_FILE,deathAuraEmitterSpecs)
+   "PrimeBombDeathAura",CONFIG.PRIME_BOMB_DEATH_AURA_FILE,deathAuraEmitterSpecs)
 
   local function TryLoadModule(folder, name)
    local mod=folder and folder:FindFirstChild(name)
@@ -2439,7 +2335,7 @@ local function CreatePortalEngine(CONFIG)
     dir=dir.Unit
     local origin=position+dir*rng:NextNumber(1,4)
     local streak=flashPart("BlastStreak",Vector3.new(0.45,0.45,3),
-     rng:NextInteger(1,3)==1 and Color3.fromRGB(255,225,245) or BOMB_VISUAL_COLOR,0.08)
+     rng:NextInteger(1,3)==1 and Color3.fromRGB(255,225,245) or CONFIG.BOMB_VISUAL_COLOR,0.08)
     streak.CFrame=CFrame.lookAt(origin,origin+dir)
     local endpoint=position+dir*rng:NextNumber(23,44)*intensity
     TweenService:Create(streak,TweenInfo.new(rng:NextNumber(0.33,0.65),Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
@@ -2649,7 +2545,7 @@ local function CreatePortalEngine(CONFIG)
    local flat=Vector3.new(look.X,0,look.Z)
    if flat.Magnitude<0.08 then flat=Vector3.new(1,0,0) end
    flat=flat.Unit
-   local portalCenter=body.Position+flat*FINAL_PORTAL_DISTANCE
+   local portalCenter=body.Position+flat*CONFIG.FINAL_PORTAL_DISTANCE
    local params=RaycastParams.new()
    params.FilterType=Enum.RaycastFilterType.Exclude
    params.FilterDescendantsInstances={model,RAGDOLLS_FOLDER,fluidFolder}
@@ -2661,9 +2557,9 @@ local function CreatePortalEngine(CONFIG)
    local outwardNormal=-flat
    local portal,root=MakeFinalUprightPortal(model,portalCenter,outwardNormal)
    if not portal then return end
-   PlayPortalSound(AUDIO.Open,portal)
+   PlayPortalSound(CONFIG.AUDIO.Open,portal)
    task.spawn(ElasticPortalIntro,portal,root)
-   task.wait(FINAL_PORTAL_OPEN_WAIT)
+   task.wait(CONFIG.FINAL_PORTAL_OPEN_WAIT)
    if not model.Parent or model:GetAttribute("BombCharred") then
     task.spawn(ClosePortal,portal,nil)
     return
@@ -2672,7 +2568,7 @@ local function CreatePortalEngine(CONFIG)
    local prev=body.Position
    local began=os.clock()
    local crossed=false
-   while model.Parent and portal.Parent and os.clock()-began<FINAL_SUCTION_MAX_DURATION do
+   while model.Parent and portal.Parent and os.clock()-began<CONFIG.FINAL_SUCTION_MAX_DURATION do
     body=GetBodyPart(model)
     if not body then break end
     local dt=RunService.Heartbeat:Wait()
@@ -2680,17 +2576,17 @@ local function CreatePortalEngine(CONFIG)
     local prevDistance=(prev-portalCenter):Dot(outwardNormal)
     local distance=(current-portalCenter):Dot(outwardNormal)
     local lateral=(current-portalCenter-outwardNormal*distance).Magnitude
-    if prevDistance>0 and distance<=0 and lateral<=FINAL_SUCTION_CAPTURE_RADIUS then
+    if prevDistance>0 and distance<=0 and lateral<=CONFIG.FINAL_SUCTION_CAPTURE_RADIUS then
      crossed=true;break
     end
-    if distance<=0.35 and lateral<=FINAL_SUCTION_CAPTURE_RADIUS then
+    if distance<=0.35 and lateral<=CONFIG.FINAL_SUCTION_CAPTURE_RADIUS then
      crossed=true;break
     end
     local aim=portalCenter-outwardNormal*3
     local delta=aim-current
     if delta.Magnitude>0.02 then
-     local velocity=delta.Unit*math.min(FINAL_SUCTION_MAX_SPEED,math.max(28,delta.Magnitude*15))
-     SetRagdollVelocity(model,body.AssemblyLinearVelocity:Lerp(velocity,math.clamp(dt*FINAL_SUCTION_RESPONSE,0,1)))
+     local velocity=delta.Unit*math.min(CONFIG.FINAL_SUCTION_MAX_SPEED,math.max(28,delta.Magnitude*15))
+     SetRagdollVelocity(model,body.AssemblyLinearVelocity:Lerp(velocity,math.clamp(dt*CONFIG.FINAL_SUCTION_RESPONSE,0,1)))
     end
     prev=current
    end
@@ -2699,11 +2595,11 @@ local function CreatePortalEngine(CONFIG)
     return
    end
    if model.Parent then
-    PlayPortalSound(AUDIO.Enter,portal)
+    PlayPortalSound(CONFIG.AUDIO.Enter,portal)
     local restoreHold=HoldModelInsidePortal(model,portalCenter,outwardNormal)
     -- Slowly chew for five seconds; the supplied old shake visual remains.
-    task.spawn(SpillPortalBloodDuringShake,portal,FINAL_PORTAL_SHAKE_DURATION)
-    ShakeFinalPortal(portal,FINAL_PORTAL_SHAKE_DURATION,model)
+    task.spawn(SpillPortalBloodDuringShake,portal,CONFIG.FINAL_PORTAL_SHAKE_DURATION)
+    ShakeFinalPortal(portal,CONFIG.FINAL_PORTAL_SHAKE_DURATION,model)
     if model:GetAttribute("BombCharred") or not model.Parent then
      -- Blast won the race against this blender ending; never eject/restart it.
      if portal.Parent then task.spawn(ClosePortal,portal,nil) end
@@ -2725,11 +2621,11 @@ local function CreatePortalEngine(CONFIG)
        piece.CanQuery=true
       end
      end
-     SetRagdollVelocity(model,outwardNormal*FINAL_EJECT_SPEED
+     SetRagdollVelocity(model,outwardNormal*CONFIG.FINAL_EJECT_SPEED
       +Vector3.new(math.random(-24,24),math.random(12,30),math.random(-24,24)))
      -- Release separate Roblox pieces, then briefly emit cartoon fluid only
      -- from the points where the pieces were attached to the remaining model.
-     local fluidSites = TearOffRandomLimbs(model,FINAL_BLOOD_COLOR,outwardNormal)
+     local fluidSites = TearOffRandomLimbs(model,CONFIG.FINAL_BLOOD_COLOR,outwardNormal)
      StartBlenderExitFluid(model,fluidSites)
      if portal:GetAttribute("RainbowPortal") then StartRainbowRagdoll(model) end
     end
@@ -2737,7 +2633,7 @@ local function CreatePortalEngine(CONFIG)
     restoreCollisions()
    end
    if portal.Parent then ClosePortal(portal,nil) end
-   if model.Parent then Debris:AddItem(model,FINAL_RAGDOLL_CLEANUP_DELAY) end
+   if model.Parent then Debris:AddItem(model,CONFIG.FINAL_RAGDOLL_CLEANUP_DELAY) end
   end
 
 
@@ -2766,7 +2662,7 @@ local function CreatePortalEngine(CONFIG)
     elseif item:IsA("BasePart") then
      -- Cover accessories, mesh limbs, faces, and all remaining parts.
      item.Color = Color3.new(0,0,0)
-     item.Material = BOMB_CHAR_MATERIAL
+     item.Material = CONFIG.BOMB_CHAR_MATERIAL
      -- Preserve original transparency: invisible helper hitboxes can be balls,
      -- and forcing Transparency=0 made them look like physical black spheres.
      -- Only the visible ragdoll geometry is recolored; no new char parts spawn.
@@ -2776,7 +2672,7 @@ local function CreatePortalEngine(CONFIG)
      end
     end
    end
-   Debris:AddItem(model, BOMB_CHARRED_CLEANUP_DELAY)
+   Debris:AddItem(model, CONFIG.BOMB_CHARRED_CLEANUP_DELAY)
    return true
   end
 
@@ -2789,7 +2685,7 @@ local function CreatePortalEngine(CONFIG)
    for _, ragdoll in ipairs(RAGDOLLS_FOLDER:GetChildren()) do
     if ragdoll:IsA("Model") and ragdoll.Parent then
      local body = GetBodyPart(ragdoll)
-     if body and (body.Position - blastAt).Magnitude <= BOMB_BLAST_RADIUS then
+     if body and (body.Position - blastAt).Magnitude <= CONFIG.BOMB_BLAST_RADIUS then
       candidates[ragdoll] = true
      end
     end
@@ -2800,12 +2696,12 @@ local function CreatePortalEngine(CONFIG)
      local delta = body.Position - blastAt
      local dist = delta.Magnitude
      local strength = (ragdoll == primaryTarget) and 1
-      or math.clamp(1 - dist/BOMB_BLAST_RADIUS, 0.22, 1)
+      or math.clamp(1 - dist/CONFIG.BOMB_BLAST_RADIUS, 0.22, 1)
      local direction = Vector3.new(delta.X, math.max(delta.Y, 0) + 5, delta.Z)
      if direction.Magnitude < 0.05 then direction = Vector3.yAxis end
      SetRagdollVelocity(ragdoll,
-      direction.Unit * (BOMB_SHOCKWAVE_SPEED * strength)
-      + Vector3.yAxis * (BOMB_SHOCKWAVE_LIFT * strength))
+      direction.Unit * (CONFIG.BOMB_SHOCKWAVE_SPEED * strength)
+      + Vector3.yAxis * (CONFIG.BOMB_SHOCKWAVE_LIFT * strength))
      local assemblies = {}
      for _, piece in ipairs(ragdoll:GetDescendants()) do
       if piece:IsA("BasePart") and not piece.Anchored then
@@ -2830,10 +2726,10 @@ local function CreatePortalEngine(CONFIG)
      end
      -- Optional cartoony ragdoll-part ejection with brief red fluid at the
      -- former Roblox joint points. This does not create wounds or physical gore.
-     if math.random() < BOMB_PART_SEPARATION_CHANCE then
+     if math.random() < CONFIG.BOMB_PART_SEPARATION_CHANCE then
       local sprayDirection=direction.Magnitude>0.01 and direction.Unit or Vector3.yAxis
-      local sites=TearOffRandomLimbs(ragdoll,BLENDER_EXIT_FLUID_COLOR,sprayDirection)
-      StartBlenderExitFluid(ragdoll,sites,true,BOMB_SEPARATION_FLUID_DURATION)
+      local sites=TearOffRandomLimbs(ragdoll,CONFIG.BLENDER_EXIT_FLUID_COLOR,sprayDirection)
+      StartBlenderExitFluid(ragdoll,sites,true,CONFIG.BOMB_SEPARATION_FLUID_DURATION)
      end
      EmitPrimeBombDeathAura(ragdoll)
     end
@@ -2858,7 +2754,7 @@ local function CreatePortalEngine(CONFIG)
    indicator.Size=Vector3.new(0.38,0.38,0.38)
    indicator.Shape=Enum.PartType.Ball
    indicator.Material=Enum.Material.Neon
-   indicator.Color=BOMB_VISUAL_COLOR
+   indicator.Color=CONFIG.BOMB_VISUAL_COLOR
    indicator.Anchored=false
    indicator.CanCollide=false
    indicator.CanTouch=false
@@ -2880,16 +2776,16 @@ local function CreatePortalEngine(CONFIG)
     return not model.Parent or model:GetAttribute("BombCharred")
    end
    -- Horizontal portal exactly five studs above the current ragdoll.
-   local center=body.Position+Vector3.yAxis*BOMB_OVERHEAD_HEIGHT
+   local center=body.Position+Vector3.yAxis*CONFIG.BOMB_OVERHEAD_HEIGHT
    local portal,root=CreatePortal(model)
    if not portal then return end
    portal.Name="TerminalBombPortal"
    portal:SetAttribute("FinalDimensionPortal",true)
    MakeTerminalPortalGreen(portal)
    PlacePortal(portal,root,center,-Vector3.yAxis)
-   PlayPortalSound(AUDIO.Open,portal)
+   PlayPortalSound(CONFIG.AUDIO.Open,portal)
    task.spawn(ElasticPortalIntro,portal,root)
-   task.wait(FINAL_PORTAL_OPEN_WAIT)
+   task.wait(CONFIG.FINAL_PORTAL_OPEN_WAIT)
    if canceled() then
     if portal.Parent then task.spawn(ClosePortal,portal,nil) end
     return
@@ -2899,15 +2795,15 @@ local function CreatePortalEngine(CONFIG)
    local bomb,indicator=CreateTerminalBomb(center-Vector3.yAxis*1.2)
    -- Arming audio starts once, using ticking.mp3\n PlayTerminalBombSound(bomb.Position,false,1)
    local bombStart=os.clock()
-   task.wait(BOMB_DROP_SETTLE)
+   task.wait(CONFIG.BOMB_DROP_SETTLE)
    -- Arm for 2.75 seconds; reproduce the uploaded pink blink cue.
    local armedAt=os.clock()
    local nextBeepAt=-1
-   while bomb.Parent and os.clock()-armedAt<BOMB_ARM_TIME and not canceled() do
+   while bomb.Parent and os.clock()-armedAt<CONFIG.BOMB_ARM_TIME and not canceled() do
     local elapsed=os.clock()-armedAt
     if elapsed>=nextBeepAt then
-     PlayTerminalBombSound(bomb.Position,false,1+elapsed/BOMB_ARM_TIME*0.6)
-     nextBeepAt=elapsed+BOMB_BEEP_INTERVAL
+     PlayTerminalBombSound(bomb.Position,false,1+elapsed/CONFIG.BOMB_ARM_TIME*0.6)
+     nextBeepAt=elapsed+CONFIG.BOMB_BEEP_INTERVAL
     end
     if indicator.Parent then
      local blinking=math.floor((os.clock()-armedAt)/0.1)%2==0
@@ -2940,7 +2836,7 @@ local function CreatePortalEngine(CONFIG)
 
   local function RunFinalPortalSequence(model,flow)
    if not model.Parent then return end
-   local chosen=flow.terminalKind or (math.random()<TERMINAL_BOMB_CHANCE and "bomb" or "blender")
+   local chosen=flow.terminalKind or (math.random()<CONFIG.TERMINAL_BOMB_CHANCE and "bomb" or "blender")
    model:SetAttribute("FinalPortalKind",chosen)
    if chosen=="bomb" then
     RunBombPortal(model)
@@ -2971,7 +2867,7 @@ local function CreatePortalEngine(CONFIG)
    -- The ejecting ragdoll must collide with the map again, unlike chain ragdolls.
    StopOpaqueBypass(model)
    flow.finalizing=true
-   flow.terminalKind=(math.random()<TERMINAL_BOMB_CHANCE) and "bomb" or "blender"
+   flow.terminalKind=(math.random()<CONFIG.TERMINAL_BOMB_CHANCE) and "bomb" or "blender"
    model:SetAttribute("FinalPortalTriggered",true)
    model:SetAttribute("FinalPortalCompleted",false)
    model:SetAttribute("FinalPortalReason",reason)
@@ -2989,7 +2885,7 @@ local function CreatePortalEngine(CONFIG)
   local ProcessRagdoll
 
   local function SpawnChainClone(source)
-   if activeClones >= MAX_ACTIVE_CLONES or totalClones >= MAX_TOTAL_CLONES then return end
+   if activeClones >= CONFIG.MAX_ACTIVE_CLONES or totalClones >= CONFIG.MAX_TOTAL_CLONES then return end
    if not source.Parent or source:GetAttribute("FinalPortalTriggered") or source:GetAttribute("BombCharred") then return end
    local oldArchivable = source.Archivable
    source.Archivable = true
@@ -3011,14 +2907,14 @@ local function CreatePortalEngine(CONFIG)
    clone:SetAttribute("BlueLoopActive",nil)
    local pivot = source:GetPivot()
    clone:PivotTo(pivot * CFrame.new(math.random(-3,3), 1.5, math.random(-3,3)))
-   cloneExpiry[clone] = os.clock() + CLONE_LIFETIME
+   cloneExpiry[clone] = os.clock() + CONFIG.CLONE_LIFETIME
    clone.Parent = RAGDOLLS_FOLDER
    task.spawn(ProcessRagdoll, clone)
    -- Expired clones get an animated terminal portal, never silent deletion.
-   task.delay(CLONE_LIFETIME, function()
+   task.delay(CONFIG.CLONE_LIFETIME, function()
     if clone.Parent then BeginTerminalSequence(clone,activeFlows[clone],"clone_lifetime") end
    end)
-   task.delay(CLONE_FAILSAFE_TIME, function()
+   task.delay(CONFIG.CLONE_FAILSAFE_TIME, function()
     if clone.Parent then BeginTerminalSequence(clone,activeFlows[clone],"clone_failsafe") end
    end)
    clone.Destroying:Once(function()
@@ -3047,7 +2943,7 @@ local function CreatePortalEngine(CONFIG)
     surface=ground.Instance,moves=0,lastMoveAt=-math.huge,
     lastTeleportAt=flow.lastTeleportAt,flow=flow,opening=true
    }
-   PlayPortalSound(AUDIO.Open,portal)
+   PlayPortalSound(CONFIG.AUDIO.Open,portal)
    local stopRotation
    task.spawn(function()
     ElasticPortalIntro(portal,root,position,normal,ground.Instance,model,function()
@@ -3058,7 +2954,7 @@ local function CreatePortalEngine(CONFIG)
    end)
    local crossed=WaitForPredictedImpact(model,portal,root,tracking)
    if crossed and model.Parent and not flow.finalizing then
-    PlayPortalSound(AUDIO.Enter,portal)
+    PlayPortalSound(CONFIG.AUDIO.Enter,portal)
     if portal:GetAttribute("RainbowPortal") then StartRainbowRagdoll(model) end
     -- The crossing is a genuine entrance; the airborne corridor will open next.
     task.spawn(ClosePortal,portal,function() if stopRotation then stopRotation() end end)
@@ -3082,7 +2978,7 @@ local function CreatePortalEngine(CONFIG)
     -- Completed teleports reset the idle clock; clone age is tracked separately.
     task.spawn(function()
      while model.Parent and not flow.finalizing do
-      if os.clock()-flow.lastTeleportAt>=FINAL_PORTAL_STALL_TIME then
+      if os.clock()-flow.lastTeleportAt>=CONFIG.FINAL_PORTAL_STALL_TIME then
        BeginTerminalSequence(model,flow,"no_teleport_5s")
        break
       end
@@ -3090,11 +2986,11 @@ local function CreatePortalEngine(CONFIG)
      end
     end)
     -- Roll ONCE per ragdoll (including each clone); never switch modes mid-chain.
-    local airOnly = math.random() < AIR_ONLY_LIFETIME_CHANCE
+    local airOnly = math.random() < CONFIG.AIR_ONLY_LIFETIME_CHANCE
     local airOnlyInitialGroundEntered=false
     model:SetAttribute("PortalAirOnly", airOnly)
     if model:GetAttribute("RainbowRagdoll") then StartRainbowRagdoll(model) end
-    while model.Parent and not flow.finalizing and (cloneExpiry[model] or completedHops < MAX_PORTAL_HOPS) do
+    while model.Parent and not flow.finalizing and (cloneExpiry[model] or completedHops < CONFIG.MAX_PORTAL_HOPS) do
      if not model.Parent then break end
      local body=GetBodyPart(model)
      if not body then break end
@@ -3121,24 +3017,24 @@ local function CreatePortalEngine(CONFIG)
       if not first then
        -- Never silently downgrade an air-only ragdoll to a floor chain.
        -- Wait for a camera-visible, unobstructed airborne pair instead.
-       task.wait(AIR_ONLY_RETRY_INTERVAL)
+       task.wait(CONFIG.AIR_ONLY_RETRY_INTERVAL)
        continue
       end
       local rainbowAfterAir=first:GetAttribute("RainbowPortal") or second:GetAttribute("RainbowPortal")
       local blueAfterAir=not rainbowAfterAir and RollBlueLoopForExit(model,flow)
       if blueAfterAir then TintBluePortal(second) end
       local restore = DisableCollision(model)
-      PlayPortalSound(AUDIO.Enter, first)
+      PlayPortalSound(CONFIG.AUDIO.Enter, first)
       local crossed = FlyBetweenAirPortals(model, startPos, targetPos, flow)
       restore()
       if crossed and model.Parent and not flow.finalizing then
-       PlayPortalSound(AUDIO.Enter, second)
+       PlayPortalSound(CONFIG.AUDIO.Enter, second)
        if rainbowAfterAir then StartRainbowRagdoll(model) end
        completedHops += 1
        flow.lastTeleportAt = os.clock()
        if cloneExpiry[model] and os.clock() >= cloneExpiry[model] then
         BeginTerminalSequence(model,flow,"clone_lifetime")
-       elseif model.Parent and math.random() < CLONE_CHANCE then
+       elseif model.Parent and math.random() < CONFIG.CLONE_CHANCE then
         SpawnChainClone(model)
        end
       end
@@ -3195,7 +3091,7 @@ local function CreatePortalEngine(CONFIG)
       end)
       tracking.opening = false
      end)
-     PlayPortalSound(AUDIO.Open, entrance)
+     PlayPortalSound(CONFIG.AUDIO.Open, entrance)
      -- Rotation starts after opening to avoid fighting the elastic part animation.
      local stopEntrance
      task.spawn(function()
@@ -3231,7 +3127,7 @@ local function CreatePortalEngine(CONFIG)
      -- preceding portal is ALREADY blue when the ragdoll exits from it.
      local blueAfterExit=RollBlueLoopForExit(model,flow)
      local airFirst,airSecond,airStart,airTarget
-     if math.random() < MIDAIR_CHAIN_CHANCE then
+     if math.random() < CONFIG.MIDAIR_CHAIN_CHANCE then
       airFirst,airSecond,airStart,airTarget = SpawnAirPair(model,body)
      end
      -- Capture any rainbow override before asynchronous portal close tasks run.
@@ -3242,12 +3138,12 @@ local function CreatePortalEngine(CONFIG)
       exit,stopExit,exitPos,exitNormal=SpawnExit(model,body,originalGroundY)
       if not exit then ClosePortal(entrance,function() if stopEntrance then stopEntrance() end end); break end
      end
-     PlayPortalSound(AUDIO.Enter, entrance)
+     PlayPortalSound(CONFIG.AUDIO.Enter, entrance)
      if airFirst then
       -- Immediate transfer into the first midair exit.
-      PlayPortalSound(AUDIO.Enter,airFirst)
+      PlayPortalSound(CONFIG.AUDIO.Enter,airFirst)
       local reached = FlyBetweenAirPortals(model,airStart,airTarget,flow)
-      if reached then PlayPortalSound(AUDIO.Enter,airSecond) end
+      if reached then PlayPortalSound(CONFIG.AUDIO.Enter,airSecond) end
       -- If the ballistic throw misses, let the ragdoll keep flying/falling.
       -- The next hop predicts its new landing point; no scripted rescue snap.
       task.spawn(ClosePortal,airFirst,nil)
@@ -3276,7 +3172,7 @@ local function CreatePortalEngine(CONFIG)
      -- Rainbow has precedence over a blue-loop detour when rolled on this hop.
      if rainbowAfterExit then blueAfterExit=false end
      if blueAfterExit then TintBluePortal(exit) end
-     if TRAVEL_TIME > 0 then task.wait(TRAVEL_TIME) end
+     if CONFIG.TRAVEL_TIME > 0 then task.wait(CONFIG.TRAVEL_TIME) end
      if model.Parent and not flow.finalizing then
       local restore=DisableCollision(model)
       local pivot=model:GetPivot()
@@ -3313,9 +3209,9 @@ local function CreatePortalEngine(CONFIG)
      completedHops += 1
      flow.lastTeleportAt = os.clock()
      -- Clone after the teleport so its own independent chain starts at the exit.
-     if model.Parent and math.random() < CLONE_CHANCE then SpawnChainClone(model) end
+     if model.Parent and math.random() < CONFIG.CLONE_CHANCE then SpawnChainClone(model) end
      task.spawn(ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
-     task.delay(LINGER_TIME,function() ClosePortal(exit,stopExit) end)
+     task.delay(CONFIG.LINGER_TIME,function() ClosePortal(exit,stopExit) end)
      -- The previous exit is already blue if this prototype detour was selected.
      MaybeRunBlueFallingLoop(model,flow,blueAfterExit)
      if model.Parent then RunService.Heartbeat:Wait() end
