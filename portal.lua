@@ -1,4 +1,4 @@
--- FR_PORTAL_QOL_R5 | rollback of strict placement filters; rainbow white bubbles + bomb spin
+-- FR_PORTAL_QOL_R5 | reliable floor re-prediction; R4 spawn behavior + R5 white bubbles/bomb spin
 -- FunnyRagdolls Portal - faithful standalone-core module (register-safe).
 -- Derived from the last working RainbowEveryPortal_10SecondLinger standalone.
 -- The loader provides settings during module initialization. Regular portal
@@ -207,6 +207,20 @@ local fluidRandom = Random.new()
 local fluidFolder = Instance.new("Folder")
 fluidFolder.Name = "LocalPortalFluid"
 fluidFolder.Parent = Workspace
+
+-- All locally generated portal models, including their renamed terminal variants.
+-- The registry is weak-keyed so a destroyed portal can be reclaimed normally.
+-- Ignoring visual portals in floor queries prevents older/lingering portals from
+-- becoming fake landing surfaces when using a different Portal.rbxm asset.
+H.ActivePortalGeometry = setmetatable({}, {__mode = "k"})
+function H.GroundQueryExclusions(model, extra)
+ local excluded = {model, RAGDOLLS_FOLDER, fluidFolder}
+ for portal in pairs(H.ActivePortalGeometry) do
+  if portal.Parent then table.insert(excluded, portal) end
+ end
+ if extra then table.insert(excluded, extra) end
+ return excluded
+end
 
 function H.SpawnFluidDrop(origin, direction, color)
  local drop = Instance.new("Part")
@@ -467,7 +481,7 @@ end
 function H.PredictGroundImpact(model, body)
  local params = RaycastParams.new()
  params.FilterType = Enum.RaycastFilterType.Exclude
- params.FilterDescendantsInstances = {model, fluidFolder, RAGDOLLS_FOLDER}
+ params.FilterDescendantsInstances = H.GroundQueryExclusions(model)
  params.IgnoreWater = true
  params.RespectCanCollide = true
 
@@ -490,7 +504,7 @@ function H.PredictGroundImpact(model, body)
    end
    if floor and floor.Normal.Y >= 0.65
     and math.abs(floor.Position.Y-hit.Position.Y) < 1.4 then
-    local exclusions = {model, RAGDOLLS_FOLDER,fluidFolder,floor.Instance}
+    local exclusions = H.GroundQueryExclusions(model, floor.Instance)
     overlap.FilterDescendantsInstances = exclusions
     local blocked = false
     for _, obstacle in ipairs(Workspace:GetPartBoundsInBox(
@@ -547,7 +561,7 @@ end
 function H.GetGround(model, body)
  local params = RaycastParams.new()
  params.FilterType = Enum.RaycastFilterType.Exclude
- params.FilterDescendantsInstances = {model,RAGDOLLS_FOLDER,fluidFolder}
+ params.FilterDescendantsInstances = H.GroundQueryExclusions(model)
  params.IgnoreWater = true
  params.RespectCanCollide = true
  -- Only look for a nearby floor. A long ray can hit a lower level of the map
@@ -696,6 +710,7 @@ function H.CreatePortal(model)
   if (obj:IsA("Script") or obj:IsA("LocalScript")) and obj.Name == "Rotate" then obj.Enabled = false end
  end
  portal.Parent = Workspace
+ H.ActivePortalGeometry[portal] = true
  -- Rare global rainbow roll: any portal type can be selected, but even
  -- multi-ragdoll clone storms cannot produce several rainbow portals at once.
  -- This is a per-portal chance, with a separate cooldown for successful rolls.
@@ -1009,9 +1024,19 @@ function H.WaitForPredictedImpact(model, portal, root, tracking)
     -- a new portal rather than an old portal hovering inside geometry.
     local sameSurface = hit.Normal:Dot(tracking.normal) >= 0.97
      and math.abs((hit.Position-tracking.position):Dot(tracking.normal)) < 1.3
-    if not sameSurface and moved > C.PREDICTION_REPLAN_DISTANCE
-     and distanceToPlane > 3.5 and not tracking.opening then
-     return finish(false) -- outer loop will re-predict / place a fresh entrance
+    -- Preserve standalone surface tracking. The old test only replanned when
+    -- the floor INSTANCE/height changed; a fast sideways deflection across the
+    -- SAME floor could strand a portal after all repositioning was used up.
+    local movedFromStart = (tracking.position-tracking.initialPosition).Magnitude
+    local ranOutOfCorrections = tracking.moves >= C.PREDICTION_MAX_REPOSITIONS
+     or movedFromStart >= C.PREDICTION_MAX_TOTAL_MOVE-0.5
+    local farBeyondPortal = moved > C.PREDICTION_MAX_TOTAL_MOVE + 4
+    local exhaustedAndMissed = ranOutOfCorrections and moved > C.ENTRY_CAPTURE_RADIUS + 3
+    local wrongSurface = not sameSurface and moved > C.PREDICTION_REPLAN_DISTANCE
+    if (wrongSurface or farBeyondPortal or exhaustedAndMissed)
+     and distanceToPlane > math.max(4.8, C.PREDICTION_FREEZE_HEIGHT + 1.0)
+     and not tracking.opening then
+     return finish(false) -- outer loop re-predicts instead of chasing a stale spot
     end
     local canAdjust = sameSurface
      and moved > C.ENTRY_REPOSITION_EPSILON
@@ -1105,7 +1130,7 @@ function H.CameraVisibleExit(model, body, minimumY)
  if viewport.X < 2 or viewport.Y < 2 then return nil end
  local params = RaycastParams.new()
  params.FilterType = Enum.RaycastFilterType.Exclude
- params.FilterDescendantsInstances = {model, fluidFolder}
+ params.FilterDescendantsInstances = H.GroundQueryExclusions(model)
  params.IgnoreWater = true
  params.RespectCanCollide = true
  local bestHit, bestScore
@@ -1139,7 +1164,7 @@ function H.RandomExit(model, body, minimumY)
  end
  local params = RaycastParams.new()
  params.FilterType = Enum.RaycastFilterType.Exclude
- params.FilterDescendantsInstances = {model}
+ params.FilterDescendantsInstances = H.GroundQueryExclusions(model)
  params.IgnoreWater = true
  local dirs = {Vector3.new(0,-1,0),Vector3.new(0,1,0),Vector3.new(1,0,0),Vector3.new(-1,0,0),Vector3.new(0,0,1),Vector3.new(0,0,-1)}
  for _ = 1, C.EXIT_CANDIDATE_ATTEMPTS do
@@ -3402,6 +3427,7 @@ H.ProcessRagdoll = function(model)
  processing[model]=nil
 end
 
+-- Ground restoration: original standalone plane crossing + stale-candidate retry.
 -- Ragdoll discovery belongs exclusively to the FunnyRagdolls loader.
 -- All original helpers, physics and timer behavior above are preserved.
 return H.ProcessRagdoll
