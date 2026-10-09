@@ -1,4 +1,4 @@
--- FR_PORTAL_QOL_R5 | rainbow white bubbles, unobstructed spawning, terminal spin
+-- FR_PORTAL_QOL_R5 | rollback of strict placement filters; rainbow white bubbles + bomb spin
 -- FunnyRagdolls Portal - faithful standalone-core module (register-safe).
 -- Derived from the last working RainbowEveryPortal_10SecondLinger standalone.
 -- The loader provides settings during module initialization. Regular portal
@@ -771,131 +771,29 @@ end
 
 -- Reject portals embedded in nearby geometry. The contacted surface is excluded
 -- because the portal is intentionally placed directly against that surface.
--- Geometry validation uses the actual 9x9 portal *panel*, not the huge
--- invisible FloorPortalTrigger. The full opening must be free of visible or
--- physically solid obstructions, including partial coverage near the rim.
-function H.IsPortalBlocker(part)
- return part:IsA("BasePart") and (part.CanCollide or part.Transparency < 0.98)
-end
-
 function H.PortalHasObstruction(portal, ragdoll, surfacePart)
- local root = H.GetRoot(portal)
- if not root or not root.Parent then return true end
- local normal = H.FaceDirection(root, H.GetVisibleFace(root)).Unit
- local right = root.CFrame.RightVector
- right = right - normal * right:Dot(normal)
- if right.Magnitude < 0.05 then
-  right = root.CFrame.UpVector - normal * root.CFrame.UpVector:Dot(normal)
- end
- if right.Magnitude < 0.05 then return true end
- right = right.Unit
- local up = normal:Cross(right).Unit
- -- Keep a little breathing room around the outermost visible rim.
- local halfSize = math.max(2.4, math.min(4.55, math.max(root.Size.X, root.Size.Y)*0.47))
- local sampleFrame = CFrame.fromMatrix(root.Position + normal*0.65, right, up, normal)
- local overlap = OverlapParams.new()
- overlap.FilterType = Enum.RaycastFilterType.Exclude
- local exclusions = {portal, RAGDOLLS_FOLDER, fluidFolder}
- if ragdoll then table.insert(exclusions, ragdoll) end
- -- A floor or wall supporting the portal belongs BEHIND the surface.
- -- Exclude that single part, but never exclude its neighboring geometry.
- if surfacePart then table.insert(exclusions, surfacePart) end
- overlap.FilterDescendantsInstances = exclusions
- overlap.MaxParts = 80
- -- Validate at both 0 and 45 degrees. Spinning a square portal frame can
- -- sweep its corners into an object even if the original angle was clear.
- for _, roll in ipairs({0, math.pi/4}) do
-  local sweptFrame = sampleFrame * CFrame.Angles(0,0,roll)
-  for _, part in ipairs(Workspace:GetPartBoundsInBox(sweptFrame,
-   Vector3.new(halfSize*2, halfSize*2, 2.1), overlap)) do
-   if H.IsPortalBlocker(part) then return true end
-  end
- end
- -- Thin parts can cover only a corner and slip through a coarse box check.
- -- Nine short rays scan the face from in front to just behind the panel.
- local ray = RaycastParams.new()
- ray.FilterType = Enum.RaycastFilterType.Exclude
- ray.FilterDescendantsInstances = exclusions
- ray.RespectCanCollide = false
- ray.IgnoreWater = true
- for _, offset in ipairs({Vector2.new(0,0),Vector2.new(1,0),Vector2.new(-1,0),
-  Vector2.new(0,1),Vector2.new(0,-1),Vector2.new(0.75,0.75),
-  Vector2.new(-0.75,0.75),Vector2.new(0.75,-0.75),Vector2.new(-0.75,-0.75)}) do
-  local point = root.Position + right*offset.X*halfSize + up*offset.Y*halfSize
-  local hit = Workspace:Raycast(point + normal*1.75, -normal*2.05, ray)
-  if hit and H.IsPortalBlocker(hit.Instance) then return true end
+ local boxCF, boxSize = portal:GetBoundingBox()
+ local params = OverlapParams.new()
+ params.FilterType = Enum.RaycastFilterType.Exclude
+ local excluded = {portal, ragdoll}
+ if surfacePart then table.insert(excluded, surfacePart) end
+ params.FilterDescendantsInstances = excluded
+ params.MaxParts = 40
+ for _, part in ipairs(Workspace:GetPartBoundsInBox(boxCF, boxSize * 0.94, params)) do
+  if part:IsA("BasePart") and part.CanQuery then return true end
  end
  return false
 end
 
 function H.NudgePortalOutOfObstruction(portal, ragdoll, surfacePosition, normal, surfacePart)
- -- The portal must stay on its selected surface: moving it forward along
- -- the normal creates a floating portal in front of the obstructing part.
+ if portal:GetAttribute("GroundLocked") then return true end
+ -- Move only along the surface normal, keeping the portal visible and preventing
+ -- it from being buried in walls/ceilings or overlapping unrelated parts.
+ for _ = 1, C.MAX_SURFACE_ADJUSTMENTS do
+  if not H.PortalHasObstruction(portal, ragdoll, surfacePart) then return true end
+  portal:PivotTo(portal:GetPivot() + normal.Unit*C.SURFACE_ADJUST_STEP)
+ end
  return not H.PortalHasObstruction(portal, ragdoll, surfacePart)
-end
-
--- Search a small patch of the same surface without moving a ground portal
--- far from the ragdoll it needs to catch. Never keep a blocked placement.
-function H.TryPlacePortal(portal, root, position, normal, ragdoll, surfacePart)
- local tangent = normal:Cross(Vector3.yAxis)
- if tangent.Magnitude < 0.05 then tangent = normal:Cross(Vector3.xAxis) end
- tangent = tangent.Unit
- local other = normal:Cross(tangent).Unit
- local offsets = {Vector2.zero,Vector2.new(2.2,0),Vector2.new(-2.2,0),
-  Vector2.new(0,2.2),Vector2.new(0,-2.2),Vector2.new(2.2,2.2),
-  Vector2.new(-2.2,2.2),Vector2.new(2.2,-2.2),Vector2.new(-2.2,-2.2)}
- local rp = RaycastParams.new()
- rp.FilterType = Enum.RaycastFilterType.Exclude
- rp.FilterDescendantsInstances = {portal,ragdoll,RAGDOLLS_FOLDER,fluidFolder}
- rp.RespectCanCollide = true
- for _, offset in ipairs(offsets) do
-  local candidate = position + tangent*offset.X + other*offset.Y
-  if surfacePart then
-   local hit = Workspace:Raycast(candidate + normal*1.5, -normal*3, rp)
-   if not hit or hit.Instance ~= surfacePart or hit.Normal:Dot(normal) < 0.85 then
-    continue
-   end
-   candidate = hit.Position
-  end
-  H.PlacePortal(portal, root, candidate, normal)
-  if not H.PortalHasObstruction(portal, ragdoll, surfacePart) then
-   return true, candidate
-  end
- end
- return false, position
-end
-
--- Clear, visibly open corridor between a ragdoll and the Blender portal.
--- Unlike general placement, this rejects even non-collidable opaque decor.
-function H.BlenderCorridorClear(model, portalCenter, portal)
- local body = H.GetBodyPart(model)
- if not body then return false end
- local from = body.Position + Vector3.yAxis*0.55
- local to = portalCenter + Vector3.yAxis*0.15
- local distance = (to-from).Magnitude
- if distance < 2 then return false end
- local exclusions = {model,RAGDOLLS_FOLDER,fluidFolder}
- if portal then table.insert(exclusions,portal) end
- local overlap = OverlapParams.new()
- overlap.FilterType = Enum.RaycastFilterType.Exclude
- overlap.FilterDescendantsInstances = exclusions
- overlap.MaxParts = 80
- local corridor = CFrame.lookAt((from+to)*0.5,to)
- for _, part in ipairs(Workspace:GetPartBoundsInBox(corridor,
-  Vector3.new(2.5,2.6,math.max(0.3,distance-2.1)),overlap)) do
-  if part:IsA("BasePart") and part.Transparency < 0.98 then return false end
- end
- local ray = RaycastParams.new()
- ray.FilterType = Enum.RaycastFilterType.Exclude
- ray.FilterDescendantsInstances = exclusions
- ray.RespectCanCollide = false
- ray.IgnoreWater = true
- local delta=to-from
- for _, side in ipairs({Vector3.zero,Vector3.yAxis*0.75,Vector3.yAxis*-0.45}) do
-  local hit = Workspace:Raycast(from+side,delta,ray)
-  if hit and hit.Instance.Transparency < 0.98 then return false end
- end
- return true
 end
 
 function H.ScalePortal(portal, from, to, duration, surfacePosition, surfaceNormal, surfacePart, ragdoll)
@@ -1127,18 +1025,11 @@ function H.WaitForPredictedImpact(model, portal, root, tracking)
      local amount = math.min(shift.Magnitude, C.PREDICTION_MAX_STEP, available)
      if amount > 0 then
       local correction = shift.Unit * amount
-      -- Reject corrected landing predictions that would embed the portal.
-      local oldPivot = portal:GetPivot()
-      portal:PivotTo(oldPivot + correction)
-      local safeMove = not H.PortalHasObstruction(portal,model,tracking.surface)
-      portal:PivotTo(oldPivot)
-      if safeMove then
-       tracking.position += correction
-       tracking.moves += 1
-       tracking.lastMoveAt = os.clock()
-       if not tracking.opening then
-        portal:PivotTo(portal:GetPivot() + correction)
-       end
+      tracking.position += correction
+      tracking.moves += 1
+      tracking.lastMoveAt = os.clock()
+      if not tracking.opening then
+       portal:PivotTo(portal:GetPivot() + correction)
       end
      end
     end
@@ -1312,20 +1203,12 @@ function H.ClosePortal(portal, stop)
 end
 
 function H.SpawnExit(model, body, minimumY)
+ local pos,normal,surfacePart = H.RandomExit(model,body,minimumY)
  local portal,root = H.CreatePortal(model)
  if not portal then return end
- local pos,normal,surfacePart
- local placed = false
- for _ = 1, 6 do
-  local attemptPos, attemptNormal, attemptSupport = H.RandomExit(model,body,minimumY)
-  local ok,safePos = H.TryPlacePortal(portal,root,attemptPos,attemptNormal,model,attemptSupport)
-  if ok then
-   pos,normal,surfacePart = safePos,attemptNormal,attemptSupport
-   placed = true
-   break
-  end
- end
- if not placed then portal:Destroy(); return nil end
+ local base = H.PlacePortal(portal,root,pos,normal)
+ if surfacePart then H.NudgePortalOutOfObstruction(portal,model,pos,normal,surfacePart) end
+ base = portal:GetPivot()
  H.PlayPortalSound(C.AUDIO.Open, portal)
  task.spawn(function()
   H.ElasticPortalIntro(portal,root, surfacePart and pos or nil, surfacePart and normal or nil, surfacePart, model)
@@ -1428,12 +1311,6 @@ function H.SpawnAirPair(model, body, airOnly)
  if wall2 then second:SetAttribute("WallMounted", true) end
  H.PlacePortal(first, firstRoot, p1, normal1)
  H.PlacePortal(second, secondRoot, p2, normal2)
- if H.PortalHasObstruction(first,model,wall1)
-  or H.PortalHasObstruction(second,model,wall2) then
-  first:Destroy()
-  second:Destroy()
-  return nil
- end
  for _, entry in ipairs({{first,firstRoot},{second,secondRoot}}) do
   task.spawn(function()
    if not entry[1].Parent then return end
@@ -1756,12 +1633,6 @@ function H.SpawnBlueFallPortals(model)
  end
  H.PlacePortal(low,lowRoot,bestPos,Vector3.yAxis)
  H.PlacePortal(high,highRoot,bestPos+Vector3.yAxis*C.BLUE_LOOP_HEIGHT,-Vector3.yAxis)
- if H.PortalHasObstruction(low,model,bestFloor and bestFloor.Instance)
-  or H.PortalHasObstruction(high,model,nil) then
-  low:Destroy()
-  high:Destroy()
-  return nil
- end
  for _, entry in ipairs({{low,lowRoot},{high,highRoot}}) do
   task.spawn(function()
    H.PlayPortalSound(C.AUDIO.Open,entry[1])
@@ -1795,9 +1666,7 @@ function H.SpawnBlueReturnEntrance(model,side,startPosition)
  local portal,root=H.CreatePortal(model)
  if not portal then return nil end
  portal.Name="BlueLoopReturnEntrance"
- local placed, safePos = H.TryPlacePortal(portal,root,desired,-forward,model,nil)
- if not placed then portal:Destroy(); return nil end
- desired = safePos
+ H.PlacePortal(portal,root,desired,-forward)
  H.PlayPortalSound(C.AUDIO.Open,portal)
  task.spawn(H.ElasticPortalIntro,portal,root)
  return portal,desired
@@ -2844,37 +2713,18 @@ function H.RunBlenderPortal(model)
  local flat=Vector3.new(look.X,0,look.Z)
  if flat.Magnitude<0.08 then flat=Vector3.new(1,0,0) end
  flat=flat.Unit
+ local portalCenter=body.Position+flat*C.FINAL_PORTAL_DISTANCE
  local params=RaycastParams.new()
  params.FilterType=Enum.RaycastFilterType.Exclude
  params.FilterDescendantsInstances={model,RAGDOLLS_FOLDER,fluidFolder}
  params.RespectCanCollide=true
- local portal,root,portalCenter,outwardNormal
- -- Try several camera-facing angles and distances. No portal is allowed to
- -- spawn inside solid geometry or pull a ragdoll through an opaque wall.
- for _, degrees in ipairs({0,35,-35,70,-70,110,-110,180}) do
-  if portal then break end
-  local direction=(CFrame.fromAxisAngle(Vector3.yAxis,math.rad(degrees))*flat).Unit
-  for _, distance in ipairs({C.FINAL_PORTAL_DISTANCE,11,14}) do
-   local candidate=body.Position+direction*distance
-   local floor=Workspace:Raycast(candidate+Vector3.yAxis*6,Vector3.new(0,-22,0),params)
-   if floor and math.abs(candidate.Y-floor.Position.Y)<6 then
-    candidate=Vector3.new(candidate.X,floor.Position.Y+5.4,candidate.Z)
-   end
-   if H.BlenderCorridorClear(model,candidate,nil) then
-    local trial,trialRoot=H.MakeFinalUprightPortal(model,candidate,-direction)
-    if trial and not H.PortalHasObstruction(trial,model,nil)
-     and H.BlenderCorridorClear(model,candidate,trial) then
-     portal,root,portalCenter,outwardNormal=trial,trialRoot,candidate,-direction
-     break
-    end
-    if trial then trial:Destroy() end
-   end
-  end
+ local ground=Workspace:Raycast(portalCenter+Vector3.yAxis*6,Vector3.new(0,-22,0),params)
+ if ground and math.abs(portalCenter.Y-ground.Position.Y)<6 then
+  portalCenter=Vector3.new(portalCenter.X,ground.Position.Y+4,portalCenter.Z)
  end
- if not portal then
-  warn("[Portal] Blender ending unavailable: no unobstructed entrance corridor")
-  return false
- end
+ local outwardNormal=-flat
+ local portal,root=H.MakeFinalUprightPortal(model,portalCenter,outwardNormal)
+ if not portal then return end
  H.PlayPortalSound(C.AUDIO.Open,portal)
  task.spawn(H.ElasticPortalIntro,portal,root)
  task.wait(C.FINAL_PORTAL_OPEN_WAIT)
@@ -3100,13 +2950,7 @@ function H.RunBombPortal(model)
  portal.Name="TerminalBombPortal"
  portal:SetAttribute("FinalDimensionPortal",true)
  H.MakeTerminalPortalGreen(portal)
- local placed,chosen=H.TryPlacePortal(portal,root,center,-Vector3.yAxis,model,nil)
- if not placed then
-  portal:Destroy()
-  warn("[Portal] Prime Bomb portal skipped: no unobstructed overhead space")
-  return
- end
- center=chosen
+ H.PlacePortal(portal,root,center,-Vector3.yAxis)
  H.PlayPortalSound(C.AUDIO.Open,portal)
  local stopBombSpin
  local function closeBombPortal()
@@ -3176,10 +3020,7 @@ function H.RunFinalPortalSequence(model,flow)
  if chosen=="bomb" then
   H.RunBombPortal(model)
  else
-  if H.RunBlenderPortal(model) == false and model.Parent
-   and not model:GetAttribute("BombCharred") then
-   H.RunBombPortal(model)
-  end
+  H.RunBlenderPortal(model)
  end
  if model.Parent then model:SetAttribute("FinalPortalCompleted",true) end
 end
@@ -3408,13 +3249,13 @@ H.ProcessRagdoll = function(model)
    if not entrance then break end
    -- Lock floor entrances to the raycast surface, not the model bounding box.
    entrance:SetAttribute("GroundLocked", not abovePortal)
-   local placementOk, safePosition = H.TryPlacePortal(entrance,root,inPos,inNormal,model,support.Instance)
-   if not placementOk then
-    entrance:Destroy()
-    RunService.Heartbeat:Wait()
-    continue
+   local base=H.PlacePortal(entrance,root,inPos,inNormal)
+   if not abovePortal then
+    -- Always check the final model volume, including fallback placements.
+    -- Exclude only the actual supporting floor when a valid raycast found one.
+    H.NudgePortalOutOfObstruction(entrance,model,inPos,inNormal,support and support.Instance or nil)
+    base=entrance:GetPivot()
    end
-   inPos=safePosition
    local tracking = {
     position=inPos, initialPosition=inPos, normal=inNormal,
     surface=support.Instance, moves=0, lastMoveAt=-math.huge,
