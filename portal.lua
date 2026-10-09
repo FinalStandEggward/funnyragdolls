@@ -1,4 +1,4 @@
--- FR_PORTAL_MINIMAL_20261009_R3 | slim config, helper registry, unchanged runtime function bodies
+-- FR_PORTAL_RAINBOW_VIBRANT_R4 | rare, vivid gradient, continuously spinning linger
 -- FunnyRagdolls Portal - faithful standalone-core module (register-safe).
 -- Derived from the last working RainbowEveryPortal_10SecondLinger standalone.
 -- The loader provides settings during module initialization. Regular portal
@@ -171,7 +171,8 @@ C.BLUE_PORTAL_COLOR = portalSetting("BLUE_PORTAL_COLOR", Color3.fromRGB(40, 170,
 C.BLUE_PORTAL_GLOW = portalSetting("BLUE_PORTAL_GLOW", Color3.fromRGB(45, 210, 255))
 -- Every newly created portal independently rolls for a rainbow override,
 -- including entrances, air pairs, blue-loop portals, return catches and terminals.
-C.RAINBOW_PORTAL_DENOMINATOR = portalSetting("RAINBOW_PORTAL_DENOMINATOR", 50)
+C.RAINBOW_PORTAL_DENOMINATOR = math.max(1, math.floor(tonumber(portalSetting("RAINBOW_PORTAL_DENOMINATOR", 250)) or 250))
+C.RAINBOW_PORTAL_COOLDOWN = math.max(0, tonumber(portalSetting("RAINBOW_PORTAL_COOLDOWN", 30)) or 30) -- global time between rainbow appearances
 C.RAINBOW_PORTAL_LINGER = portalSetting("RAINBOW_PORTAL_LINGER", 10.0) -- seconds AFTER this portal would normally close
 C.RAINBOW_PORTAL_HUE_SPEED = portalSetting("RAINBOW_PORTAL_HUE_SPEED", 0.30)
 C.RAINBOW_RAGDOLL_HUE_SPEED = portalSetting("RAINBOW_RAGDOLL_HUE_SPEED", 0.20)
@@ -678,7 +679,10 @@ function H.ApplyPortalImageAppearance(portal, model)
  end
 end
 
--- Forward declaration: all portal types share the same rainbow roll.
+-- Rainbow rolls are shared by every portal type. 20 hops can spawn 40+ portals,
+-- so a 1-in-50 roll PER portal was much more frequent than it appeared.
+-- Keep a single cooldown across this loader instance, including clone chains.
+H.LastRainbowSpawnAt = -math.huge
 H.StartRainbowPortal = nil
 function H.CreatePortal(model)
  local clone = PortalTemplate:Clone()
@@ -692,9 +696,13 @@ function H.CreatePortal(model)
   if (obj:IsA("Script") or obj:IsA("LocalScript")) and obj.Name == "Rotate" then obj.Enabled = false end
  end
  portal.Parent = Workspace
- -- Exactly one independent 1-in-50 roll per newly created portal.
- -- Rainbow supersedes its ordinary green, gold or blue theme if selected.
- if math.random(1, C.RAINBOW_PORTAL_DENOMINATOR) == 1 then
+ -- Rare global rainbow roll: any portal type can be selected, but even
+ -- multi-ragdoll clone storms cannot produce several rainbow portals at once.
+ -- This is a per-portal chance, with a separate cooldown for successful rolls.
+ local now = os.clock()
+ if now - H.LastRainbowSpawnAt >= C.RAINBOW_PORTAL_COOLDOWN
+  and math.random(1, C.RAINBOW_PORTAL_DENOMINATOR) == 1 then
+  H.LastRainbowSpawnAt = now
   H.StartRainbowPortal(portal)
  end
  return portal, root
@@ -1168,12 +1176,16 @@ function H.ClosePortal(portal, stop)
  if stop then stop() end
  if not portal or not portal.Parent then return end
  if portal:GetAttribute("RainbowPortal") then
-  -- Hold a rainbow portal's full open appearance for ten extra seconds.
-  -- Mark it before scheduling so repeated close requests cannot stack timers.
+  -- The normal stop callback above stops the active spin. Start a fresh
+  -- independent spin for the entire decorative linger, including portals that
+  -- were never given a stop callback (certain blue and terminal portals).
   if portal:GetAttribute("RainbowClosingScheduled") then return end
   portal:SetAttribute("RainbowClosingScheduled", true)
-  -- Keep it decorative during the linger; no invisible hitboxes can block
-  -- later ragdolls or their predicted paths.
+  local root = H.GetRoot(portal)
+  local normal = root and H.FaceDirection(root, H.GetVisibleFace(root)) or Vector3.yAxis
+  local stopLingerSpin = H.StartRotation(portal, portal:GetPivot(), normal)
+  -- Retain visuals, but remove collision/query/touch so old portal hitboxes
+  -- cannot obstruct the ragdoll or the smart portal-ground predictor.
   for _, item in ipairs(portal:GetDescendants()) do
    if item:IsA("BasePart") then
     item.CanCollide = false
@@ -1182,6 +1194,7 @@ function H.ClosePortal(portal, stop)
    end
   end
   task.delay(C.RAINBOW_PORTAL_LINGER, function()
+   stopLingerSpin()
    if portal.Parent then H.ActuallyClosePortal(portal) end
   end)
   return
@@ -1407,55 +1420,90 @@ end
 -- original bubble imagery. The coroutine ends on portal destruction.
 H.StartRainbowPortal = function(portal)
  if not portal or not portal.Parent or portal:GetAttribute("RainbowPortal") then return end
- portal:SetAttribute("RainbowPortal",true)
- portal:SetAttribute("EvilMortyTheme",false)
- portal:SetAttribute("BluePrototypePortal",false)
- local colored={}
- for _,item in ipairs(portal:GetDescendants()) do
-  if not H.IsBubbleSubtree(item,portal) then
-   local supported=item:IsA("BasePart") or item:IsA("ImageLabel")
-    or item:IsA("ImageButton") or item:IsA("PointLight")
-    or item:IsA("SpotLight") or item:IsA("SurfaceLight")
-    or item:IsA("ParticleEmitter") or item:IsA("Beam")
-    or item:IsA("Trail") or item:IsA("Decal")
-    or item:IsA("UIStroke") or item:IsA("UIGradient")
-    or item:IsA("Highlight") or item:IsA("Fire")
-    or item:IsA("Smoke") or item:IsA("Sparkles")
-   if supported then table.insert(colored,item) end
+ portal:SetAttribute("RainbowPortal", true)
+ portal:SetAttribute("EvilMortyTheme", false)
+ portal:SetAttribute("BluePrototypePortal", false)
+ local colored, gradients = {}, {}
+ for _, item in ipairs(portal:GetDescendants()) do
+  -- All visible layers (including the original bubble textures) receive a
+  -- coordinated saturated hue. Independent complementary hues on overlapping
+  -- transparent layers used to average into washed-out gray.
+  local supported = item:IsA("BasePart") or item:IsA("ImageLabel")
+   or item:IsA("ImageButton") or item:IsA("PointLight")
+   or item:IsA("SpotLight") or item:IsA("SurfaceLight")
+   or item:IsA("ParticleEmitter") or item:IsA("Beam")
+   or item:IsA("Trail") or item:IsA("Decal")
+   or item:IsA("UIStroke") or item:IsA("Highlight")
+   or item:IsA("Fire") or item:IsA("Smoke") or item:IsA("Sparkles")
+  if supported then
+   table.insert(colored, item)
+   if item:IsA("PointLight") or item:IsA("SpotLight") or item:IsA("SurfaceLight") then
+    item.Brightness = math.max(item.Brightness, 2.8)
+    if item:IsA("PointLight") then item.Range = math.max(item.Range, 15) end
+   end
+   -- A true 6-color ribbon WITHIN each portal image, rather than separate
+   -- differently-tinted transparent images layered on each other. The same
+   -- gradient is applied across overlapping ImageLabels to avoid gray mixing.
+   if (item:IsA("ImageLabel") or item:IsA("ImageButton"))
+    and item:FindFirstAncestorWhichIsA("SurfaceGui")
+    and not H.IsBubbleSubtree(item, portal) then
+    local gradient = item:FindFirstChild("RainbowColorGradient")
+    if not gradient then
+     gradient = Instance.new("UIGradient")
+     gradient.Name = "RainbowColorGradient"
+     gradient.Parent = item
+    end
+    gradient.Rotation = 0
+    table.insert(gradients, {image=item, gradient=gradient})
+   end
   end
  end
  task.spawn(function()
   while portal.Parent and portal:GetAttribute("RainbowPortal") do
-   local baseHue=(os.clock()*C.RAINBOW_PORTAL_HUE_SPEED)%1
-   for i,item in ipairs(colored) do
+   local hue = (os.clock()*C.RAINBOW_PORTAL_HUE_SPEED)%1
+   local mainColor = Color3.fromHSV(hue, 1, 1)
+   local vividRibbon = ColorSequence.new({
+    ColorSequenceKeypoint.new(0.00, Color3.fromHSV(hue, 1, 1)),
+    ColorSequenceKeypoint.new(0.20, Color3.fromHSV((hue+0.2)%1, 1, 1)),
+    ColorSequenceKeypoint.new(0.40, Color3.fromHSV((hue+0.4)%1, 1, 1)),
+    ColorSequenceKeypoint.new(0.60, Color3.fromHSV((hue+0.6)%1, 1, 1)),
+    ColorSequenceKeypoint.new(0.80, Color3.fromHSV((hue+0.8)%1, 1, 1)),
+    ColorSequenceKeypoint.new(1.00, Color3.fromHSV(hue, 1, 1)),
+   })
+   for _, item in ipairs(colored) do
     if item.Parent then
-     local color=Color3.fromHSV((baseHue+(i-1)*0.13)%1,1,1)
      if item:IsA("ImageLabel") or item:IsA("ImageButton") then
-      item.ImageColor3=color
+      -- Keep image brightness at white when a rainbow gradient is attached;
+      -- multiplying two unrelated colors would darken/desaturate it.
+      item.ImageColor3 = item:FindFirstChild("RainbowColorGradient")
+       and Color3.new(1, 1, 1) or mainColor
      elseif item:IsA("BasePart") then
-      item.Color=color
+      item.Color = mainColor
      elseif item:IsA("PointLight") or item:IsA("SpotLight")
       or item:IsA("SurfaceLight") then
-      item.Color=color
+      item.Color = mainColor
      elseif item:IsA("ParticleEmitter") or item:IsA("Beam") or item:IsA("Trail") then
-      item.Color=ColorSequence.new(color)
+      item.Color = ColorSequence.new(mainColor)
      elseif item:IsA("Decal") then
-      item.Color3=color
+      item.Color3 = mainColor
      elseif item:IsA("UIStroke") then
-      item.Color=color
-     elseif item:IsA("UIGradient") then
-      item.Color=ColorSequence.new(color)
+      item.Color = mainColor
      elseif item:IsA("Highlight") then
-      item.FillColor=color
-      item.OutlineColor=color
+      item.FillColor = mainColor
+      item.OutlineColor = mainColor
      elseif item:IsA("Fire") then
-      item.Color=color
-      item.SecondaryColor=color
+      item.Color = mainColor
+      item.SecondaryColor = mainColor
      elseif item:IsA("Smoke") then
-      item.Color=color
+      item.Color = mainColor
      elseif item:IsA("Sparkles") then
-      item.SparkleColor=color
+      item.SparkleColor = mainColor
      end
+    end
+   end
+   for _, entry in ipairs(gradients) do
+    if entry.image.Parent and entry.gradient.Parent then
+     entry.gradient.Color = vividRibbon
     end
    end
    task.wait(C.RAINBOW_COLOR_UPDATE)
