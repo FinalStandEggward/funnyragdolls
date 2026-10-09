@@ -1,11 +1,13 @@
--- FunnyRagdolls Portal - faithful standalone-core module.
+-- FR_PORTAL_MINIMAL_20261009_R3 | slim config, helper registry, unchanged runtime function bodies
+-- FunnyRagdolls Portal - faithful standalone-core module (register-safe).
 -- Derived from the last working RainbowEveryPortal_10SecondLinger standalone.
 -- The loader provides settings during module initialization. Regular portal
 -- mechanics and their lexical scopes stay unchanged.
 local portalBootstrapEnv = (type(getgenv) == "function" and getgenv()) or _G
 local portalSettings = portalBootstrapEnv.__FunnyRagdollsPortalSettings
 assert(type(portalSettings) == "table", "[FunnyRagdolls/Portal] Launch this through the updated FunnyRagdolls loader")
-local C = {} -- Frozen per-load configuration snapshot; reduces Luau local-register pressure.
+local H = {} -- Internal helpers live here, avoiding Luau's 200-local register limit.
+local C = {} -- Internal defaults with a small external override set.
 local function portalSetting(name, fallback)
     local configured = portalSettings[name]
     if configured == nil then return fallback end
@@ -185,7 +187,7 @@ C.MAX_TOTAL_CLONES = portalSetting("MAX_TOTAL_CLONES", 24) -- total spawned by t
 C.BANISH_DISTANCE = portalSetting("BANISH_DISTANCE", 3000) -- off-map teleport before deletion
 C.CLONE_FAILSAFE_TIME = portalSetting("CLONE_FAILSAFE_TIME", 45) -- clean up if it cannot reach another portal
 
-local function LoadAudio(fileName, fallbackId)
+function H.LoadAudio(fileName, fallbackId)
  if getcustomasset then
   local ok, asset = pcall(function() return getcustomasset(fileName) end)
   if ok and asset then print("[Portal Audio] Local:", fileName); return asset end
@@ -205,7 +207,7 @@ local fluidFolder = Instance.new("Folder")
 fluidFolder.Name = "LocalPortalFluid"
 fluidFolder.Parent = Workspace
 
-local function SpawnFluidDrop(origin, direction, color)
+function H.SpawnFluidDrop(origin, direction, color)
  local drop = Instance.new("Part")
  drop.Name = "PortalFluidDrop"
  drop.Shape = Enum.PartType.Ball
@@ -279,7 +281,7 @@ local function SpawnFluidDrop(origin, direction, color)
  end)
 end
 
-local function PlayPortalSound(info, portal)
+function H.PlayPortalSound(info, portal)
  if not portal or not portal.Parent then return end
  local root = portal:IsA("BasePart") and portal or portal.PrimaryPart or portal:FindFirstChildWhichIsA("BasePart", true)
  if not root then return end
@@ -295,7 +297,7 @@ local function PlayPortalSound(info, portal)
  emitter.Parent = Workspace
  local sound = Instance.new("Sound")
  sound.Name = "PortalSound"
- sound.SoundId = LoadAudio(info.File, info.ID)
+ sound.SoundId = H.LoadAudio(info.File, info.ID)
  sound.Volume = .7
  sound.RollOffMode = Enum.RollOffMode.InverseTapered
  sound.RollOffMinDistance = C.SOUND_MIN_DISTANCE
@@ -312,7 +314,7 @@ end
 -- Use the original game's sound assets when known, otherwise local files or
 -- configurable fallbacks. This changes audio only; no damaging explosion.
 -- Prefer the user's local audio files over unrelated sounds in ReplicatedStorage.
-local function ResolveTerminalSound(name, fileName, fallback)
+function H.ResolveTerminalSound(name, fileName, fallback)
  if type(getcustomasset) == "function" then
   local ok, asset = pcall(getcustomasset, fileName)
   if ok and type(asset) == "string" and asset ~= "" then return asset end
@@ -321,7 +323,7 @@ local function ResolveTerminalSound(name, fileName, fallback)
  return fallback
 end
 
-local function PlayTerminalBombSound(position, isExplosion, playbackSpeed)
+function H.PlayTerminalBombSound(position, isExplosion, playbackSpeed)
  local holder=Instance.new("Part")
  holder.Name=isExplosion and "PrimeBombExplosionAudio" or "PrimeBombTickAudio"
  holder.Size=Vector3.new(0.1,0.1,0.1)
@@ -335,8 +337,8 @@ local function PlayTerminalBombSound(position, isExplosion, playbackSpeed)
  local sound=Instance.new("Sound")
  sound.Name=holder.Name
  sound.SoundId=isExplosion
-  and ResolveTerminalSound("PrimeBombExplosion",C.BOMB_EXPLOSION_SOUND_FILE,C.BOMB_EXPLOSION_SOUND_ID)
-  or ResolveTerminalSound("PrimeBombTick",C.BOMB_TICK_FILE,C.BOMB_TICK_SOUND_ID)
+  and H.ResolveTerminalSound("PrimeBombExplosion",C.BOMB_EXPLOSION_SOUND_FILE,C.BOMB_EXPLOSION_SOUND_ID)
+  or H.ResolveTerminalSound("PrimeBombTick",C.BOMB_TICK_FILE,C.BOMB_TICK_SOUND_ID)
  sound.Volume=isExplosion and 10 or 3.5
  sound.PlaybackSpeed=playbackSpeed or 1
  sound.RollOffMode=Enum.RollOffMode.InverseTapered
@@ -349,7 +351,7 @@ local function PlayTerminalBombSound(position, isExplosion, playbackSpeed)
  return sound
 end
 
-local function EmitPortalClosingFluid(frame, size, color)
+function H.EmitPortalClosingFluid(frame, size, color)
  if not C.ENABLE_CLOSING_FLUID then return end
  local camera = Workspace.CurrentCamera
  if camera and (camera.CFrame.Position - frame.Position).Magnitude > C.FLUID_MAX_CAMERA_DISTANCE then return end
@@ -358,11 +360,11 @@ local function EmitPortalClosingFluid(frame, size, color)
   local theta = fluidRandom:NextNumber(0, math.pi * 2)
   local radius = math.sqrt(fluidRandom:NextNumber())
   local origin = (frame * CFrame.new(math.cos(theta)*rx*radius, math.sin(theta)*ry*radius, -0.18)).Position
-  SpawnFluidDrop(origin, frame.LookVector, color)
+  H.SpawnFluidDrop(origin, frame.LookVector, color)
  end
 end
 
-local function LoadPortal()
+function H.LoadPortal()
  if not getcustomasset then warn("[Portal] getcustomasset unavailable"); return nil end
  local ok, assetId = pcall(function() return getcustomasset(C.PORTAL_FILE) end)
  if not ok or not assetId then warn("[Portal] Could not load Portal.rbxm:", assetId); return nil end
@@ -372,10 +374,10 @@ local function LoadPortal()
  template.Name, template.Parent = "PortalTemplate", ReplicatedStorage
  return template
 end
-local PortalTemplate = LoadPortal()
+local PortalTemplate = H.LoadPortal()
 assert(PortalTemplate, "[FunnyRagdolls/Portal] Portal.rbxm could not be loaded")
 
-local function GetBodyPart(model)
+function H.GetBodyPart(model)
  for _, name in ipairs({"HumanoidRootPart","UpperTorso","LowerTorso","Torso"}) do
   local p = model:FindFirstChild(name, true)
   if p and p:IsA("BasePart") then return p end
@@ -388,7 +390,7 @@ end
 -- and transparent/invisible platforms retain their ordinary collisions.
 -- PhysicsService collision groups are deliberately avoided because changing
 -- existing map groups could break unrelated game systems.
-local function StartOpaquePassThrough(model)
+function H.StartOpaquePassThrough(model)
  if not C.PASS_THROUGH_OPAQUE then return function() end end
  local holder = Instance.new("Folder")
  holder.Name = "PortalOpaquePassThrough"
@@ -401,7 +403,7 @@ local function StartOpaquePassThrough(model)
  scanParams.FilterDescendantsInstances = {RAGDOLLS_FOLDER, fluidFolder}
  scanParams.MaxParts = C.OPAQUE_MAX_NEARBY_PARTS
  local function update()
-  local body = GetBodyPart(model)
+  local body = H.GetBodyPart(model)
   if not body then return end
   local ragdollParts = {}
   for _, p in ipairs(model:GetDescendants()) do
@@ -461,7 +463,7 @@ end
 -- Multi-point, obstruction-aware floor predictor. A narrow ray handles the actual
 -- center-of-mass flight, while an occasional spherecast detects walls a ragdoll
 -- body would graze. Never predict through a solid wall into a hidden floor.
-local function PredictGroundImpact(model, body)
+function H.PredictGroundImpact(model, body)
  local params = RaycastParams.new()
  params.FilterType = Enum.RaycastFilterType.Exclude
  params.FilterDescendantsInstances = {model, fluidFolder, RAGDOLLS_FOLDER}
@@ -541,7 +543,7 @@ local function PredictGroundImpact(model, body)
  return nil
 end
 
-local function GetGround(model, body)
+function H.GetGround(model, body)
  local params = RaycastParams.new()
  params.FilterType = Enum.RaycastFilterType.Exclude
  params.FilterDescendantsInstances = {model,RAGDOLLS_FOLDER,fluidFolder}
@@ -560,7 +562,7 @@ local function GetGround(model, body)
  return nil
 end
 
-local function GetRoot(portal)
+function H.GetRoot(portal)
  if portal:IsA("BasePart") then return portal end
  if portal:IsA("Model") then
   if portal.PrimaryPart then return portal.PrimaryPart end
@@ -581,7 +583,7 @@ C.EVIL_MORTY_IMAGE_COLOR = portalSetting("EVIL_MORTY_IMAGE_COLOR", Color3.fromRG
 C.EVIL_MORTY_ACCENT = portalSetting("EVIL_MORTY_ACCENT", Color3.fromRGB(255, 221, 48))
 C.EVIL_MORTY_GLOW = portalSetting("EVIL_MORTY_GLOW", Color3.fromRGB(255, 185, 15))
 
-local function IsBubbleSubtree(item, portal)
+function H.IsBubbleSubtree(item, portal)
  local current = item
  while current and current ~= portal do
   local cleaned = string.lower(current.Name):gsub("[%s_%-]", "")
@@ -593,7 +595,7 @@ end
 
 -- Match exactly the leaderboard's rules, not its other highlight categories:
 -- (KillerWins - KillerLosses >= 7) OR (SurvivorWins - SurvivorLosses >= 15).
-local function PlayerIsSuspicious(player)
+function H.PlayerIsSuspicious(player)
  if not player then return false end
  local data = player:FindFirstChild("PlayerData")
  local stats = data and data:FindFirstChild("Stats")
@@ -609,7 +611,7 @@ local function PlayerIsSuspicious(player)
   or ((tonumber(sw.Value) or 0) - (tonumber(sl.Value) or 0) >= 15)
 end
 
-local function GetRagdollOwner(model)
+function H.GetRagdollOwner(model)
  if not model then return nil end
  local candidates = {}
  local username = model:GetAttribute("Username")
@@ -626,11 +628,11 @@ local function GetRagdollOwner(model)
  return nil
 end
 
-local function ApplyPortalImageAppearance(portal, model)
- local suspicious = PlayerIsSuspicious(GetRagdollOwner(model))
+function H.ApplyPortalImageAppearance(portal, model)
+ local suspicious = H.PlayerIsSuspicious(H.GetRagdollOwner(model))
  portal:SetAttribute("EvilMortyTheme", suspicious)
  for _, item in ipairs(portal:GetDescendants()) do
-  local isBubble = IsBubbleSubtree(item, portal)
+  local isBubble = H.IsBubbleSubtree(item, portal)
   if item:IsA("ImageLabel") or item:IsA("ImageButton") then
    if isBubble then
     -- Keep the bubble tint/geometry as supplied in Portal.rbxm.
@@ -677,14 +679,14 @@ local function ApplyPortalImageAppearance(portal, model)
 end
 
 -- Forward declaration: all portal types share the same rainbow roll.
-local StartRainbowPortal
-local function CreatePortal(model)
+H.StartRainbowPortal = nil
+function H.CreatePortal(model)
  local clone = PortalTemplate:Clone()
  local portal
  if clone:IsA("Model") then portal = clone else portal = Instance.new("Model"); clone.Parent = portal end
  portal.Name = "RagdollPortal"
- ApplyPortalImageAppearance(portal, model)
- local root = GetRoot(portal)
+ H.ApplyPortalImageAppearance(portal, model)
+ local root = H.GetRoot(portal)
  if not root then portal:Destroy(); warn("[Portal] Asset contains no BasePart"); return end
  for _, obj in ipairs(portal:GetDescendants()) do
   if (obj:IsA("Script") or obj:IsA("LocalScript")) and obj.Name == "Rotate" then obj.Enabled = false end
@@ -693,18 +695,18 @@ local function CreatePortal(model)
  -- Exactly one independent 1-in-50 roll per newly created portal.
  -- Rainbow supersedes its ordinary green, gold or blue theme if selected.
  if math.random(1, C.RAINBOW_PORTAL_DENOMINATOR) == 1 then
-  StartRainbowPortal(portal)
+  H.StartRainbowPortal(portal)
  end
  return portal, root
 end
 
-local function GetVisibleFace(root)
+function H.GetVisibleFace(root)
  for _, obj in ipairs(root:GetDescendants()) do
   if obj:IsA("SurfaceGui") or obj:IsA("Decal") or obj:IsA("Texture") then return obj.Face end
  end
  return Enum.NormalId.Front
 end
-local function FaceDirection(root, face)
+function H.FaceDirection(root, face)
  if face == Enum.NormalId.Front then return root.CFrame.LookVector end
  if face == Enum.NormalId.Back then return -root.CFrame.LookVector end
  if face == Enum.NormalId.Top then return root.CFrame.UpVector end
@@ -712,7 +714,7 @@ local function FaceDirection(root, face)
  if face == Enum.NormalId.Right then return root.CFrame.RightVector end
  return -root.CFrame.RightVector
 end
-local function RotationBetween(a,b)
+function H.RotationBetween(a,b)
  a,b = a.Unit,b.Unit
  local dot = math.clamp(a:Dot(b),-1,1)
  if dot > 0.9999 then return CFrame.new() end
@@ -729,7 +731,7 @@ end
 -- panel; using GetBoundingBox() for the entire model incorrectly drags the
 -- visible panel below the floor. Project the panel's own oriented thickness
 -- onto the surface normal and keep its visible face slightly above the floor.
-local function AnchorPortalToSurface(portal, root, surfacePosition, normal, clearance)
+function H.AnchorPortalToSurface(portal, root, surfacePosition, normal, clearance)
  normal = normal.Unit
  if portal:GetAttribute("GroundLocked") then
   clearance = 0.035 -- visible panel almost flush with the real floor
@@ -751,17 +753,17 @@ local function AnchorPortalToSurface(portal, root, surfacePosition, normal, clea
  return portal:GetPivot()
 end
 
-local function PlacePortal(portal, root, position, normal)
+function H.PlacePortal(portal, root, position, normal)
  normal = normal.Unit
- local alignment = RotationBetween(FaceDirection(root, GetVisibleFace(root)), normal)
+ local alignment = H.RotationBetween(H.FaceDirection(root, H.GetVisibleFace(root)), normal)
  local rotation = root.CFrame - root.CFrame.Position
  portal:PivotTo(CFrame.new(position) * alignment * rotation)
- return AnchorPortalToSurface(portal, root, position, normal, C.SURFACE_CLEARANCE)
+ return H.AnchorPortalToSurface(portal, root, position, normal, C.SURFACE_CLEARANCE)
 end
 
 -- Reject portals embedded in nearby geometry. The contacted surface is excluded
 -- because the portal is intentionally placed directly against that surface.
-local function PortalHasObstruction(portal, ragdoll, surfacePart)
+function H.PortalHasObstruction(portal, ragdoll, surfacePart)
  local boxCF, boxSize = portal:GetBoundingBox()
  local params = OverlapParams.new()
  params.FilterType = Enum.RaycastFilterType.Exclude
@@ -775,18 +777,18 @@ local function PortalHasObstruction(portal, ragdoll, surfacePart)
  return false
 end
 
-local function NudgePortalOutOfObstruction(portal, ragdoll, surfacePosition, normal, surfacePart)
+function H.NudgePortalOutOfObstruction(portal, ragdoll, surfacePosition, normal, surfacePart)
  if portal:GetAttribute("GroundLocked") then return true end
  -- Move only along the surface normal, keeping the portal visible and preventing
  -- it from being buried in walls/ceilings or overlapping unrelated parts.
  for _ = 1, C.MAX_SURFACE_ADJUSTMENTS do
-  if not PortalHasObstruction(portal, ragdoll, surfacePart) then return true end
+  if not H.PortalHasObstruction(portal, ragdoll, surfacePart) then return true end
   portal:PivotTo(portal:GetPivot() + normal.Unit*C.SURFACE_ADJUST_STEP)
  end
- return not PortalHasObstruction(portal, ragdoll, surfacePart)
+ return not H.PortalHasObstruction(portal, ragdoll, surfacePart)
 end
 
-local function ScalePortal(portal, from, to, duration, surfacePosition, surfaceNormal, surfacePart, ragdoll)
+function H.ScalePortal(portal, from, to, duration, surfacePosition, surfaceNormal, surfacePart, ragdoll)
  if not portal or not portal.Parent then return end
  local start = os.clock()
  while portal.Parent do
@@ -795,8 +797,8 @@ local function ScalePortal(portal, from, to, duration, surfacePosition, surfaceN
   pcall(function() portal:ScaleTo(from+(to-from)*eased) end)
   if surfacePosition and surfaceNormal then
    pcall(function()
-    AnchorPortalToSurface(portal, GetRoot(portal), surfacePosition, surfaceNormal, C.SURFACE_CLEARANCE)
-    NudgePortalOutOfObstruction(portal, ragdoll, surfacePosition, surfaceNormal, surfacePart)
+    H.AnchorPortalToSurface(portal, H.GetRoot(portal), surfacePosition, surfaceNormal, C.SURFACE_CLEARANCE)
+    H.NudgePortalOutOfObstruction(portal, ragdoll, surfacePosition, surfaceNormal, surfacePart)
    end)
   end
   if alpha >= 1 then break end
@@ -813,7 +815,7 @@ C.OPEN_TINY = portalSetting("OPEN_TINY", Vector3.new(0.131578952, 0.123839005, 1
 C.OPEN_STRETCH = portalSetting("OPEN_STRETCH", Vector3.new(0.275000005, 1.176470637, 1))
 C.OPEN_FULL = portalSetting("OPEN_FULL", Vector3.new(1, 1, 1))
 
-local function ElasticPortalIntro(portal, root, surfacePosition, surfaceNormal, surfacePart, ragdoll, dynamicTarget)
+function H.ElasticPortalIntro(portal, root, surfacePosition, surfaceNormal, surfacePart, ragdoll, dynamicTarget)
  if not portal or not portal.Parent or not root or not root.Parent then return end
  local reference = root.CFrame
  local referenceSurface = surfacePosition
@@ -880,7 +882,7 @@ local function ElasticPortalIntro(portal, root, surfacePosition, surfaceNormal, 
  apply(C.OPEN_FULL)
 end
 
-local function StartRotation(portal, base, normal)
+function H.StartRotation(portal, base, normal)
  local angle, connection = 0, nil
  connection = RunService.Heartbeat:Connect(function(dt)
   if not portal.Parent then if connection then connection:Disconnect() end; return end
@@ -892,13 +894,13 @@ local function StartRotation(portal, base, normal)
  return function() if connection then connection:Disconnect(); connection=nil end end
 end
 
-local function GetTrigger(portal)
+function H.GetTrigger(portal)
  local trigger = portal:FindFirstChild("FloorPortalTrigger", true)
  if trigger and trigger:IsA("BasePart") then trigger.CanTouch=true; trigger.CanQuery=true; return trigger end
- return GetRoot(portal)
+ return H.GetRoot(portal)
 end
 
-local function BounceRagdollTowardPortal(model, trigger, body)
+function H.BounceRagdollTowardPortal(model, trigger, body)
  if not model.Parent or not trigger.Parent or not body or not body.Parent then return end
  -- Give the ragdoll a visible hop toward the portal if it hasn't entered naturally.
  local offset = trigger.Position - body.Position
@@ -916,7 +918,7 @@ local function BounceRagdollTowardPortal(model, trigger, body)
  end
 end
 
-local function WaitForEntry(model, trigger, portal, body, bounceAfter)
+function H.WaitForEntry(model, trigger, portal, body, bounceAfter)
  local entered = false
  local bounced = false
  local connection = trigger.Touched:Connect(function(hit) if hit and hit:IsDescendantOf(model) then entered=true end end)
@@ -928,7 +930,7 @@ local function WaitForEntry(model, trigger, portal, body, bounceAfter)
   if #Workspace:GetPartBoundsInBox(trigger.CFrame, trigger.Size, params) > 0 then entered=true; break end
   if bounceAfter and not bounced and os.clock()-start >= bounceAfter then
    bounced = true
-   BounceRagdollTowardPortal(model, trigger, body)
+   H.BounceRagdollTowardPortal(model, trigger, body)
   end
   RunService.Heartbeat:Wait()
  end
@@ -936,7 +938,7 @@ local function WaitForEntry(model, trigger, portal, body, bounceAfter)
  return entered
 end
 
-local function SetRagdollVelocity(model, velocity)
+function H.SetRagdollVelocity(model, velocity)
  local seen = {}
  for _, part in ipairs(model:GetDescendants()) do
   if part:IsA("BasePart") and not part.Anchored then
@@ -952,7 +954,7 @@ end
 -- Every heartbeat: update the predicted floor impact, then detect entry.
 -- If no portal entry has occurred for 2.5 seconds, switch to an aggressive
 -- collision-free rescue until we actually cross the CURRENT portal.
-local function DisableCollision(model)
+function H.DisableCollision(model)
  local old = {}
  local function apply(obj)
   if obj:IsA("BasePart") and old[obj] == nil then old[obj]=obj.CanCollide; obj.CanCollide=false end
@@ -966,7 +968,7 @@ local function DisableCollision(model)
 end
 
 
-local function WaitForPredictedImpact(model, portal, root, tracking)
+function H.WaitForPredictedImpact(model, portal, root, tracking)
  local previousPosition = nil
  local recoveryRestore = nil
  local recovering = false
@@ -979,18 +981,18 @@ local function WaitForPredictedImpact(model, portal, root, tracking)
  end
  while model.Parent and portal.Parent do
   if tracking.flow and tracking.flow.finalizing then return finish(false) end
-  local body = GetBodyPart(model)
+  local body = H.GetBodyPart(model)
   if not body then return finish(false) end
 
   -- The recovery clock carries across every portal hop for this ragdoll.
   -- Only real portal entry resets it, not portal creation or prediction updates.
   if not recovering and os.clock() - tracking.lastTeleportAt >= C.STUCK_TELEPORT_TIMEOUT then
    recovering = true
-   recoveryRestore = DisableCollision(model)
+   recoveryRestore = H.DisableCollision(model)
   end
 
   if not recovering then
-   local hit = PredictGroundImpact(model, body)
+   local hit = H.PredictGroundImpact(model, body)
    if hit and hit.Normal.Y >= 0.65 then
     local moved = (hit.Position - tracking.position).Magnitude
     local distanceToPlane = (body.Position - tracking.position):Dot(tracking.normal)
@@ -1069,7 +1071,7 @@ local function WaitForPredictedImpact(model, portal, root, tracking)
    if not recovering and os.clock()-tracking.lastTeleportAt>=C.PREDICTION_EARLY_ASSIST_TIME
     and not tracking.opening and radial>captureRadius+2.0 then
     recovering=true
-    recoveryRestore=DisableCollision(model)
+    recoveryRestore=H.DisableCollision(model)
    end
   if recovering then
    -- Strong velocity-based pull toward a point BEYOND the portal plane.
@@ -1077,7 +1079,7 @@ local function WaitForPredictedImpact(model, portal, root, tracking)
    local target = tracking.position - normal*C.STUCK_PORTAL_OVERSHOOT
    local displacement = target - current
    if displacement.Magnitude > 0.05 then
-    SetRagdollVelocity(model, displacement.Unit * C.STUCK_PULL_SPEED)
+    H.SetRagdollVelocity(model, displacement.Unit * C.STUCK_PULL_SPEED)
    end
   end
   previousPosition = current
@@ -1088,7 +1090,7 @@ end
 
 -- Pick a surface from the visible part of the camera's screen.
 -- A clear line of sight is required, so the portal cannot be hidden behind a wall.
-local function CameraVisibleExit(model, body, minimumY)
+function H.CameraVisibleExit(model, body, minimumY)
  local camera = Workspace.CurrentCamera
  if not camera then return nil end
  local viewport = camera.ViewportSize
@@ -1122,9 +1124,9 @@ local function CameraVisibleExit(model, body, minimumY)
  return nil
 end
 
-local function RandomExit(model, body, minimumY)
+function H.RandomExit(model, body, minimumY)
  if C.CAMERA_AWARE_EXITS then
-  local pos, normal, part = CameraVisibleExit(model, body, minimumY)
+  local pos, normal, part = H.CameraVisibleExit(model, body, minimumY)
   if pos then return pos, normal, part end
  end
  local params = RaycastParams.new()
@@ -1146,22 +1148,22 @@ local function RandomExit(model, body, minimumY)
  return fallback, Vector3.new(0,1,0), nil
 end
 
-local function ActuallyClosePortal(portal)
+function H.ActuallyClosePortal(portal)
  if not portal or not portal.Parent then return end
- PlayPortalSound(C.AUDIO.Close, portal)
- local fluidRoot = GetRoot(portal)
+ H.PlayPortalSound(C.AUDIO.Close, portal)
+ local fluidRoot = H.GetRoot(portal)
  local fluidFrame = fluidRoot and fluidRoot.CFrame
  local fluidSize = fluidRoot and fluidRoot.Size
  local fluidLight = portal:FindFirstChildWhichIsA("PointLight", true)
  local fluidColor = fluidLight and fluidLight.Color or Color3.fromRGB(26,255,0)
- ScalePortal(portal,C.FINAL_SCALE,C.END_SCALE,C.SHRINK_TIME)
+ H.ScalePortal(portal,C.FINAL_SCALE,C.END_SCALE,C.SHRINK_TIME)
  if fluidFrame and fluidSize then
-  EmitPortalClosingFluid(fluidFrame, fluidSize, fluidColor)
+  H.EmitPortalClosingFluid(fluidFrame, fluidSize, fluidColor)
  end
  if portal.Parent then portal:Destroy() end
 end
 
-local function ClosePortal(portal, stop)
+function H.ClosePortal(portal, stop)
  -- Stop rotation/tracking immediately; the next hop must not be delayed.
  if stop then stop() end
  if not portal or not portal.Parent then return end
@@ -1180,31 +1182,31 @@ local function ClosePortal(portal, stop)
    end
   end
   task.delay(C.RAINBOW_PORTAL_LINGER, function()
-   if portal.Parent then ActuallyClosePortal(portal) end
+   if portal.Parent then H.ActuallyClosePortal(portal) end
   end)
   return
  end
- ActuallyClosePortal(portal)
+ H.ActuallyClosePortal(portal)
 end
 
-local function SpawnExit(model, body, minimumY)
- local pos,normal,surfacePart = RandomExit(model,body,minimumY)
- local portal,root = CreatePortal(model)
+function H.SpawnExit(model, body, minimumY)
+ local pos,normal,surfacePart = H.RandomExit(model,body,minimumY)
+ local portal,root = H.CreatePortal(model)
  if not portal then return end
- local base = PlacePortal(portal,root,pos,normal)
- if surfacePart then NudgePortalOutOfObstruction(portal,model,pos,normal,surfacePart) end
+ local base = H.PlacePortal(portal,root,pos,normal)
+ if surfacePart then H.NudgePortalOutOfObstruction(portal,model,pos,normal,surfacePart) end
  base = portal:GetPivot()
- PlayPortalSound(C.AUDIO.Open, portal)
+ H.PlayPortalSound(C.AUDIO.Open, portal)
  task.spawn(function()
-  ElasticPortalIntro(portal,root, surfacePart and pos or nil, surfacePart and normal or nil, surfacePart, model)
+  H.ElasticPortalIntro(portal,root, surfacePart and pos or nil, surfacePart and normal or nil, surfacePart, model)
  end)
- local stop = StartRotation(portal,portal:GetPivot(),normal)
+ local stop = H.StartRotation(portal,portal:GetPivot(),normal)
  return portal,stop,pos,normal,surfacePart
 end
 
 -- Each air pair can vary in distance and direction, with optional wall mounts.
 -- Portals still face the direction of travel, so straight flight stays valid.
-local function SpawnAirPair(model, body, airOnly)
+function H.SpawnAirPair(model, body, airOnly)
  local cam = Workspace.CurrentCamera
  if not cam then return end
  local right, forward, up = cam.CFrame.RightVector, cam.CFrame.LookVector, cam.CFrame.UpVector
@@ -1288,19 +1290,19 @@ local function SpawnAirPair(model, body, airOnly)
  end
  if not chosen then return end
  local p1, p2, normal1, normal2, wall1, wall2 = table.unpack(chosen, 1, 6)
- local first, firstRoot = CreatePortal(model)
+ local first, firstRoot = H.CreatePortal(model)
  if not first then return end
- local second, secondRoot = CreatePortal(model)
+ local second, secondRoot = H.CreatePortal(model)
  if not second then first:Destroy(); return end
  if wall1 then first:SetAttribute("WallMounted", true) end
  if wall2 then second:SetAttribute("WallMounted", true) end
- PlacePortal(first, firstRoot, p1, normal1)
- PlacePortal(second, secondRoot, p2, normal2)
+ H.PlacePortal(first, firstRoot, p1, normal1)
+ H.PlacePortal(second, secondRoot, p2, normal2)
  for _, entry in ipairs({{first,firstRoot},{second,secondRoot}}) do
   task.spawn(function()
    if not entry[1].Parent then return end
-   PlayPortalSound(C.AUDIO.Open, entry[1])
-   ElasticPortalIntro(entry[1], entry[2])
+   H.PlayPortalSound(C.AUDIO.Open, entry[1])
+   H.ElasticPortalIntro(entry[1], entry[2])
   end)
  end
  return first, second, p1, p2
@@ -1310,9 +1312,9 @@ end
 -- between a paired set of airborne portals along a straight line.
 -- Setting velocity on Heartbeat counteracts gravity without anchoring limbs;
 -- rotations and joint movement remain free, and normal physics resumes on exit.
-local function FlyBetweenAirPortals(model, firstPos, secondPos, flow)
+function H.FlyBetweenAirPortals(model, firstPos, secondPos, flow)
  if not model.Parent then return false end
- local body = GetBodyPart(model)
+ local body = H.GetBodyPart(model)
  if not body then return false end
  local travel = secondPos - firstPos
  local length = travel.Magnitude
@@ -1323,7 +1325,7 @@ local function FlyBetweenAirPortals(model, firstPos, secondPos, flow)
  -- Teleport from the ground entrance INTO the first airborne opening.
  -- Align the torso rather than the model pivot (which can be offset by limbs).
  model:PivotTo(model:GetPivot() + (firstPos - body.Position))
- SetRagdollVelocity(model, forward * speed)
+ H.SetRagdollVelocity(model, forward * speed)
 
  local previousPosition = body.Position
  local previousAlong = (previousPosition-secondPos):Dot(forward)
@@ -1358,7 +1360,7 @@ local function FlyBetweenAirPortals(model, firstPos, secondPos, flow)
   if correction.Magnitude > C.MIDAIR_MAX_STEERING_SPEED then
    correction = correction.Unit * C.MIDAIR_MAX_STEERING_SPEED
   end
-  SetRagdollVelocity(model, forward*speed + correction)
+  H.SetRagdollVelocity(model, forward*speed + correction)
  end
  return false
 end
@@ -1366,13 +1368,13 @@ end
 -- BLUE PROTOTYPE INFINITE-FALLING LOOP --------------------------------------
 -- Two stationary portals: the lower catches the fall, the upper sends the
 -- ragdoll downward again. Crossing is physics-frame driven, not a loop timer.
-local function TintBluePortal(portal)
+function H.TintBluePortal(portal)
  -- A rolled rainbow portal can replace even one of the blue prototype portals.
  if portal:GetAttribute("RainbowPortal") then return end
  portal:SetAttribute("BluePrototypePortal", true)
  portal:SetAttribute("EvilMortyTheme", false)
  for _, item in ipairs(portal:GetDescendants()) do
-  if not IsBubbleSubtree(item, portal) then
+  if not H.IsBubbleSubtree(item, portal) then
    if item:IsA("ImageLabel") or item:IsA("ImageButton") then
     item.ImageColor3 = C.BLUE_PORTAL_COLOR
    elseif item:IsA("BasePart") then
@@ -1403,14 +1405,14 @@ end
 -- RAINBOW PORTALS ---------------------------------------------------------
 -- Apply a multi-hued cycle, retaining the supplied portal geometry and the
 -- original bubble imagery. The coroutine ends on portal destruction.
-StartRainbowPortal = function(portal)
+H.StartRainbowPortal = function(portal)
  if not portal or not portal.Parent or portal:GetAttribute("RainbowPortal") then return end
  portal:SetAttribute("RainbowPortal",true)
  portal:SetAttribute("EvilMortyTheme",false)
  portal:SetAttribute("BluePrototypePortal",false)
  local colored={}
  for _,item in ipairs(portal:GetDescendants()) do
-  if not IsBubbleSubtree(item,portal) then
+  if not H.IsBubbleSubtree(item,portal) then
    local supported=item:IsA("BasePart") or item:IsA("ImageLabel")
     or item:IsA("ImageButton") or item:IsA("PointLight")
     or item:IsA("SpotLight") or item:IsA("SurfaceLight")
@@ -1427,7 +1429,7 @@ StartRainbowPortal = function(portal)
    local baseHue=(os.clock()*C.RAINBOW_PORTAL_HUE_SPEED)%1
    for i,item in ipairs(colored) do
     if item.Parent then
-     local color=Color3.fromHSV((baseHue+(i-1)*0.13)%1,0.95,1)
+     local color=Color3.fromHSV((baseHue+(i-1)*0.13)%1,1,1)
      if item:IsA("ImageLabel") or item:IsA("ImageButton") then
       item.ImageColor3=color
      elseif item:IsA("BasePart") then
@@ -1464,7 +1466,7 @@ end
 -- Color only rendered ragdoll geometry; don't expose invisible physics parts.
 -- Bomb charring terminates the cycle, allowing permanent black recoloring.
 local rainbowRagdollRunning=setmetatable({},{__mode="k"})
-local function StartRainbowRagdoll(model)
+function H.StartRainbowRagdoll(model)
  if not model or not model.Parent or model:GetAttribute("BombCharred") then return end
  model:SetAttribute("RainbowRagdoll",true)
  if rainbowRagdollRunning[model] then return end
@@ -1489,7 +1491,7 @@ local function StartRainbowRagdoll(model)
    local hue=(now*C.RAINBOW_RAGDOLL_HUE_SPEED)%1
    for i,part in ipairs(colored) do
     if part.Parent and not model:GetAttribute("BombCharred") then
-     local color=Color3.fromHSV((hue+(i-1)*0.115)%1,0.92,1)
+     local color=Color3.fromHSV((hue+(i-1)*0.115)%1,1,1)
      if part:IsA("BasePart") then part.Color=color
      elseif part:IsA("Decal") then part.Color3=color end
     end
@@ -1500,7 +1502,7 @@ local function StartRainbowRagdoll(model)
  end)
 end
 
-local function RollBlueLoopForExit(model,flow)
+function H.RollBlueLoopForExit(model,flow)
  return model and model.Parent and not flow.finalizing
   and not model:GetAttribute("BombCharred")
   and not model:GetAttribute("BlueLoopUsed")
@@ -1508,8 +1510,8 @@ local function RollBlueLoopForExit(model,flow)
 end
 -- END RAINBOW PORTALS -----------------------------------------------------
 
-local function SpawnBlueFallPortals(model)
- local body = GetBodyPart(model)
+function H.SpawnBlueFallPortals(model)
+ local body = H.GetBodyPart(model)
  if not body then return end
  local cam = Workspace.CurrentCamera
  local offsets = {Vector3.zero}
@@ -1563,22 +1565,22 @@ local function SpawnBlueFallPortals(model)
   end
  end
  if not bestPos then return end
- local low, lowRoot = CreatePortal(model)
+ local low, lowRoot = H.CreatePortal(model)
  if not low then return end
- local high, highRoot = CreatePortal(model)
+ local high, highRoot = H.CreatePortal(model)
  if not high then low:Destroy(); return end
  low.Name, high.Name = "BlueFallLowerPortal", "BlueFallUpperPortal"
- TintBluePortal(low)
- TintBluePortal(high)
+ H.TintBluePortal(low)
+ H.TintBluePortal(high)
  if bestFloor and bestFloor.Normal.Y > 0.8 then
   low:SetAttribute("GroundLocked", true)
  end
- PlacePortal(low,lowRoot,bestPos,Vector3.yAxis)
- PlacePortal(high,highRoot,bestPos+Vector3.yAxis*C.BLUE_LOOP_HEIGHT,-Vector3.yAxis)
+ H.PlacePortal(low,lowRoot,bestPos,Vector3.yAxis)
+ H.PlacePortal(high,highRoot,bestPos+Vector3.yAxis*C.BLUE_LOOP_HEIGHT,-Vector3.yAxis)
  for _, entry in ipairs({{low,lowRoot},{high,highRoot}}) do
   task.spawn(function()
-   PlayPortalSound(C.AUDIO.Open,entry[1])
-   ElasticPortalIntro(entry[1],entry[2])
+   H.PlayPortalSound(C.AUDIO.Open,entry[1])
+   H.ElasticPortalIntro(entry[1],entry[2])
   end)
  end
  return low,high,bestPos,bestPos+Vector3.yAxis*C.BLUE_LOOP_HEIGHT,highRoot
@@ -1587,7 +1589,7 @@ end
 -- Guaranteed visual continuation after the blue prototype's final sideways
 -- launch. A green (or leaderboard-yellow) catcher is placed directly ahead,
 -- detects real plane crossing, then uses the usual camera-aware exit portal.
-local function SpawnBlueReturnEntrance(model,side,startPosition)
+function H.SpawnBlueReturnEntrance(model,side,startPosition)
  local forward=side.Unit
  local desired=startPosition+forward*C.BLUE_RETURN_DISTANCE+Vector3.yAxis*0.4
  local params=RaycastParams.new()
@@ -1605,39 +1607,39 @@ local function SpawnBlueReturnEntrance(model,side,startPosition)
   local gap=(obstacle.Position-startPosition).Magnitude
   desired=startPosition+forward*math.max(4,math.min(C.BLUE_RETURN_DISTANCE,gap-2))
  end
- local portal,root=CreatePortal(model)
+ local portal,root=H.CreatePortal(model)
  if not portal then return nil end
  portal.Name="BlueLoopReturnEntrance"
- PlacePortal(portal,root,desired,-forward)
- PlayPortalSound(C.AUDIO.Open,portal)
- task.spawn(ElasticPortalIntro,portal,root)
+ H.PlacePortal(portal,root,desired,-forward)
+ H.PlayPortalSound(C.AUDIO.Open,portal)
+ task.spawn(H.ElasticPortalIntro,portal,root)
  return portal,desired
 end
 
-local function RunBlueReturnPortal(model,flow,side,preOpened,prePosition)
+function H.RunBlueReturnPortal(model,flow,side,preOpened,prePosition)
  if not model.Parent or flow.finalizing or model:GetAttribute("BombCharred") then
-  if preOpened and preOpened.Parent then task.spawn(ClosePortal,preOpened,nil) end
+  if preOpened and preOpened.Parent then task.spawn(H.ClosePortal,preOpened,nil) end
   return false
  end
- local body=GetBodyPart(model)
+ local body=H.GetBodyPart(model)
  if not body then
-  if preOpened and preOpened.Parent then task.spawn(ClosePortal,preOpened,nil) end
+  if preOpened and preOpened.Parent then task.spawn(H.ClosePortal,preOpened,nil) end
   return false
  end
  local forward=side.Unit
  local entrance,desired=preOpened,prePosition
  if not entrance or not entrance.Parent or not desired then
-  entrance,desired=SpawnBlueReturnEntrance(model,side,body.Position)
+  entrance,desired=H.SpawnBlueReturnEntrance(model,side,body.Position)
  end
  if not entrance then return false end
- local restore=DisableCollision(model)
+ local restore=H.DisableCollision(model)
  local started=os.clock()
  local previous=body.Position
  local caught=false
  while model.Parent and entrance.Parent and not flow.finalizing
   and not model:GetAttribute("BombCharred") and os.clock()-started<C.BLUE_RETURN_TIMEOUT do
   RunService.Heartbeat:Wait()
-  body=GetBodyPart(model)
+  body=H.GetBodyPart(model)
   if not body then break end
   local current=body.Position
   local before=(previous-desired):Dot(-forward)
@@ -1660,41 +1662,41 @@ local function RunBlueReturnPortal(model,flow,side,preOpened,prePosition)
   local lateral=target-current-forward*(target-current):Dot(forward)
   local assist=lateral*8
   if assist.Magnitude>38 then assist=assist.Unit*38 end
-  SetRagdollVelocity(model,forward*math.max(C.BLUE_LOOP_SIDE_LAUNCH,105)+assist)
+  H.SetRagdollVelocity(model,forward*math.max(C.BLUE_LOOP_SIDE_LAUNCH,105)+assist)
   previous=current
  end
  restore()
  if caught and model.Parent and not flow.finalizing then
-  PlayPortalSound(C.AUDIO.Enter,entrance)
-  local bodyNow=GetBodyPart(model) or body
-  local exit,stopExit,exitPos,exitNormal=SpawnExit(model,bodyNow,-math.huge)
+  H.PlayPortalSound(C.AUDIO.Enter,entrance)
+  local bodyNow=H.GetBodyPart(model) or body
+  local exit,stopExit,exitPos,exitNormal=H.SpawnExit(model,bodyNow,-math.huge)
   local rainbowReturn = entrance:GetAttribute("RainbowPortal")
    or (exit and exit:GetAttribute("RainbowPortal"))
   if exit and exitPos and exitNormal and model.Parent and not flow.finalizing then
-   local noCollision=DisableCollision(model)
+   local noCollision=H.DisableCollision(model)
    local pivot=model:GetPivot()
    model:PivotTo(CFrame.new(exitPos+exitNormal*3)*(pivot-pivot.Position))
-   SetRagdollVelocity(model,exitNormal*math.random(40,68)
+   H.SetRagdollVelocity(model,exitNormal*math.random(40,68)
     +Vector3.new(math.random(-16,16),math.random(8,25),math.random(-16,16)))
    noCollision()
-   PlayPortalSound(C.AUDIO.Enter,exit)
-   if rainbowReturn then StartRainbowRagdoll(model) end
+   H.PlayPortalSound(C.AUDIO.Enter,exit)
+   if rainbowReturn then H.StartRainbowRagdoll(model) end
    flow.lastTeleportAt=os.clock()
    task.delay(C.LINGER_TIME,function()
-    if exit.Parent then ClosePortal(exit,stopExit) end
+    if exit.Parent then H.ClosePortal(exit,stopExit) end
    end)
-   task.spawn(ClosePortal,entrance,nil)
+   task.spawn(H.ClosePortal,entrance,nil)
    return true
   end
-  if exit then task.spawn(ClosePortal,exit,stopExit) end
+  if exit then task.spawn(H.ClosePortal,exit,stopExit) end
  end
- if entrance.Parent then task.spawn(ClosePortal,entrance,nil) end
+ if entrance.Parent then task.spawn(H.ClosePortal,entrance,nil) end
  return false
 end
 
-local function RunBlueFallingLoop(model,flow)
+function H.RunBlueFallingLoop(model,flow)
  if not model.Parent or flow.finalizing or model:GetAttribute("BombCharred") then return false end
- local low,high,lowPos,highPos,highRoot = SpawnBlueFallPortals(model)
+ local low,high,lowPos,highPos,highRoot = H.SpawnBlueFallPortals(model)
  if not low or not high then return false end
  model:SetAttribute("BlueLoopActive",true)
  local function active()
@@ -1705,8 +1707,8 @@ local function RunBlueFallingLoop(model,flow)
  local function cleanup()
   if restoreCollision then restoreCollision(); restoreCollision=nil end
   model:SetAttribute("BlueLoopActive",false)
-  if low.Parent then task.spawn(ClosePortal,low,nil) end
-  if high.Parent then task.spawn(ClosePortal,high,nil) end
+  if low.Parent then task.spawn(H.ClosePortal,low,nil) end
+  if high.Parent then task.spawn(H.ClosePortal,high,nil) end
  end
  -- Allow both portals to finish their original two-stage elastic opening.
  local openedAt=os.clock()
@@ -1714,18 +1716,18 @@ local function RunBlueFallingLoop(model,flow)
   RunService.Heartbeat:Wait()
  end
  if not active() then cleanup(); return false end
- restoreCollision=DisableCollision(model)
+ restoreCollision=H.DisableCollision(model)
  local count=math.random(C.BLUE_LOOP_MIN_FALLS,C.BLUE_LOOP_MAX_FALLS)
- local initialBody=GetBodyPart(model)
+ local initialBody=H.GetBodyPart(model)
  if not initialBody then cleanup(); return false end
  model:PivotTo(model:GetPivot()+(highPos-Vector3.yAxis*2-initialBody.Position))
  local downSpeed=C.BLUE_LOOP_START_SPEED
- SetRagdollVelocity(model,-Vector3.yAxis*downSpeed)
+ H.SetRagdollVelocity(model,-Vector3.yAxis*downSpeed)
  local completed=0
  local finalSide,finalReturnPortal,finalReturnPosition
  for pass=1,count do
   if not active() then break end
-  local body=GetBodyPart(model)
+  local body=H.GetBodyPart(model)
   if not body then break end
   local previous=body.Position
   local reached=false
@@ -1748,24 +1750,24 @@ local function RunBlueFallingLoop(model,flow)
     local velocity=body.AssemblyLinearVelocity
     local steer=planar*C.BLUE_LOOP_STEERING
     if steer.Magnitude > 38 then steer=steer.Unit*38 end
-    SetRagdollVelocity(model,Vector3.new(steer.X,velocity.Y,steer.Z))
+    H.SetRagdollVelocity(model,Vector3.new(steer.X,velocity.Y,steer.Z))
    end
    previous=current
   end
   if not reached or not active() then break end
   completed += 1
   flow.lastTeleportAt=os.clock() -- a genuine crossing resets the 5s watchdog
-  PlayPortalSound(C.AUDIO.Enter,low)
+  H.PlayPortalSound(C.AUDIO.Enter,low)
   if low:GetAttribute("RainbowPortal") or high:GetAttribute("RainbowPortal") then
-   StartRainbowRagdoll(model)
+   H.StartRainbowRagdoll(model)
   end
   downSpeed=math.min(C.BLUE_LOOP_MAX_SPEED,downSpeed+C.BLUE_LOOP_SPEED_GAIN)
   if pass < count then
-   local torso=GetBodyPart(model)
+   local torso=H.GetBodyPart(model)
    if not torso then break end
    model:PivotTo(model:GetPivot()+(highPos-Vector3.yAxis*2-torso.Position))
-   SetRagdollVelocity(model,-Vector3.yAxis*downSpeed)
-   PlayPortalSound(C.AUDIO.Enter,high)
+   H.SetRagdollVelocity(model,-Vector3.yAxis*downSpeed)
+   H.PlayPortalSound(C.AUDIO.Enter,high)
   else
    -- Final pass: upper opening visibly turns sideways, then ejects horizontally.
    local camera=Workspace.CurrentCamera
@@ -1776,10 +1778,10 @@ local function RunBlueFallingLoop(model,flow)
    side=side.Unit
    -- Prepare the ordinary entrance WHILE the upper blue portal is rotating.
    -- Its normal opening animation therefore starts before the ragdoll launches.
-   finalReturnPortal,finalReturnPosition=SpawnBlueReturnEntrance(
+   finalReturnPortal,finalReturnPosition=H.SpawnBlueReturnEntrance(
     model,side,highPos+side*2.4)
    local oldPivot=high:GetPivot()
-   PlacePortal(high,highRoot,highPos,side)
+   H.PlacePortal(high,highRoot,highPos,side)
    local endPivot=high:GetPivot()
    high:PivotTo(oldPivot)
    local rotateAt=os.clock()
@@ -1789,11 +1791,11 @@ local function RunBlueFallingLoop(model,flow)
    end
    if not active() then break end
    high:PivotTo(endPivot)
-   local torso=GetBodyPart(model)
+   local torso=H.GetBodyPart(model)
    if not torso then break end
    model:PivotTo(model:GetPivot()+(highPos+side*2.4-torso.Position))
-   SetRagdollVelocity(model,side*math.max(C.BLUE_LOOP_SIDE_LAUNCH,downSpeed*1.1)+Vector3.yAxis*14)
-   PlayPortalSound(C.AUDIO.Enter,high)
+   H.SetRagdollVelocity(model,side*math.max(C.BLUE_LOOP_SIDE_LAUNCH,downSpeed*1.1)+Vector3.yAxis*14)
+   H.PlayPortalSound(C.AUDIO.Enter,high)
    flow.lastTeleportAt=os.clock()
    finalSide=side
   end
@@ -1802,20 +1804,20 @@ local function RunBlueFallingLoop(model,flow)
  if completed==count and finalSide and not flow.finalizing
   and model.Parent and not model:GetAttribute("BombCharred") then
   -- This return portal makes the next hop visible and physically reachable.
-  return RunBlueReturnPortal(model,flow,finalSide,finalReturnPortal,finalReturnPosition)
+  return H.RunBlueReturnPortal(model,flow,finalSide,finalReturnPortal,finalReturnPosition)
  end
  if finalReturnPortal and finalReturnPortal.Parent then
-  task.spawn(ClosePortal,finalReturnPortal,nil)
+  task.spawn(H.ClosePortal,finalReturnPortal,nil)
  end
  return false
 end
 
-local function MaybeRunBlueFallingLoop(model,flow,wasSelected)
+function H.MaybeRunBlueFallingLoop(model,flow,wasSelected)
  if not model.Parent or flow.finalizing or model:GetAttribute("BombCharred")
   or model:GetAttribute("BlueLoopUsed") or not wasSelected then
   return
  end
- if RunBlueFallingLoop(model,flow) then
+ if H.RunBlueFallingLoop(model,flow) then
   model:SetAttribute("BlueLoopUsed",true)
  end
 end
@@ -1824,12 +1826,12 @@ end
 -- FINAL ONE-WAY PORTAL -------------------------------------------------------
 -- A self-contained visual adaptation of portalOpenBlood, falsePortalLegBlood,
 -- and falsePortalExitShake. No game MintBlood module is required.
-local function FinalPortalFluidColor(portal)
+function H.FinalPortalFluidColor(portal)
  local lamp = portal and portal:FindFirstChildWhichIsA("PointLight", true)
  return lamp and lamp.Color or Color3.fromRGB(26, 255, 0)
 end
 
-local function EmitFinalLegSpray(model, color)
+function H.EmitFinalLegSpray(model, color)
  -- Respect the original attachment names when they exist. Emit simple colored
  -- portal droplets; the effect works even on ragdolls without attachments.
  for _, name in ipairs({"Left Leg", "Right Leg", "LeftLowerLeg", "RightLowerLeg"}) do
@@ -1840,12 +1842,12 @@ local function EmitFinalLegSpray(model, color)
    local velocity = part.AssemblyLinearVelocity
    local outward = velocity.Magnitude > 1 and velocity.Unit or part.CFrame.LookVector
    local direction = (outward*0.78 + part.CFrame.UpVector*0.22).Unit
-   for _ = 1, 3 do SpawnFluidDrop(start, direction, color) end
+   for _ = 1, 3 do H.SpawnFluidDrop(start, direction, color) end
    task.delay(0.08, function()
     if part.Parent then
      local second = outward*0.35 - Vector3.new(0, 0.65, 0)
      if second.Magnitude > 0.001 then
-      for _ = 1, 2 do SpawnFluidDrop(start, second.Unit, color) end
+      for _ = 1, 2 do H.SpawnFluidDrop(start, second.Unit, color) end
      end
     end
    end)
@@ -1854,7 +1856,7 @@ local function EmitFinalLegSpray(model, color)
 end
 
 
-local function EmitPortalBloodBurst(frame, size, direction, color, count)
+function H.EmitPortalBloodBurst(frame, size, direction, color, count)
  color = color or C.FINAL_BLOOD_COLOR
  direction = (typeof(direction) == "Vector3" and direction.Magnitude > 0.001) and direction.Unit or Vector3.new(0, 0, 1)
  size = typeof(size) == "Vector3" and size or Vector3.new(8, 8.5, 0.1)
@@ -1864,25 +1866,25 @@ local function EmitPortalBloodBurst(frame, size, direction, color, count)
   local theta = math.random() * math.pi * 2
   local radius = math.sqrt(math.random())
   local origin = frame * CFrame.new(math.cos(theta) * rx * radius, math.sin(theta) * ry * radius, -0.18)
-  SpawnFluidDrop(origin.Position, direction, color)
+  H.SpawnFluidDrop(origin.Position, direction, color)
  end
 end
 
-local function SpillPortalBloodDuringShake(portal, duration)
- local root = GetRoot(portal)
+function H.SpillPortalBloodDuringShake(portal, duration)
+ local root = H.GetRoot(portal)
  if not root then return end
  local started = os.clock()
  while portal.Parent and os.clock() - started < duration do
-  root = GetRoot(portal)
+  root = H.GetRoot(portal)
   if not root then break end
-  EmitPortalBloodBurst(root.CFrame, root.Size, root.CFrame.LookVector, C.FINAL_BLOOD_COLOR, 4)
+  H.EmitPortalBloodBurst(root.CFrame, root.Size, root.CFrame.LookVector, C.FINAL_BLOOD_COLOR, 4)
   task.wait(C.FINAL_SHAKE_BLOOD_INTERVAL)
  end
 end
 
 -- Find the point on the remaining ragdoll where a released Roblox limb
 -- was connected. Prefer actual ragdoll constraints/rig joints when available.
-local function FindLimbConnection(model, releasedPart)
+function H.FindLimbConnection(model, releasedPart)
  for _, item in ipairs(model:GetDescendants()) do
   if item:IsA("BallSocketConstraint") or item:IsA("HingeConstraint") then
    local a, b = item.Attachment0, item.Attachment1
@@ -1922,7 +1924,7 @@ local function FindLimbConnection(model, releasedPart)
  end
 end
 
-local function StartBlenderExitFluid(model, sites, allowCharred, duration)
+function H.StartBlenderExitFluid(model, sites, allowCharred, duration)
  if not C.BLENDER_EXIT_FLUID or #sites == 0 then return end
  task.spawn(function()
   local began = os.clock()
@@ -1934,7 +1936,7 @@ local function StartBlenderExitFluid(model, sites, allowCharred, duration)
      local velocity = parent.AssemblyLinearVelocity
      local direction = Vector3.new(math.random(-6,6)*0.12, 0.65, math.random(-6,6)*0.12)
      if velocity.Magnitude > 1 then direction += velocity.Unit*0.30 end
-     SpawnFluidDrop(site.WorldPosition, direction.Unit, C.BLENDER_EXIT_FLUID_COLOR)
+     H.SpawnFluidDrop(site.WorldPosition, direction.Unit, C.BLENDER_EXIT_FLUID_COLOR)
     end
    end
    task.wait(C.BLENDER_EXIT_FLUID_INTERVAL)
@@ -1947,7 +1949,7 @@ end
 
 -- Separate a few simple Roblox limb parts as before, remembering their
 -- former attachment locations for the brief, post-ejection fluid effect.
-local function TearOffRandomLimbs(model, color, outward)
+function H.TearOffRandomLimbs(model, color, outward)
  local limbCandidates, seen = {}, {}
  for _, name in ipairs({
   "Left Arm","Right Arm","Left Leg","Right Leg",
@@ -1967,7 +1969,7 @@ local function TearOffRandomLimbs(model, color, outward)
  for _ = 1, count do
   local chosen = table.remove(limbCandidates, math.random(1,#limbCandidates))
   if chosen and chosen.Parent then
-   local connectedPart, point = FindLimbConnection(model, chosen)
+   local connectedPart, point = H.FindLimbConnection(model, chosen)
    if connectedPart and point then
     table.insert(connectionRecords, {part = connectedPart, point = point})
    end
@@ -2012,7 +2014,7 @@ local function TearOffRandomLimbs(model, color, outward)
  return sites
 end
 
-local function ShakeFinalPortal(portal, duration, owner)
+function H.ShakeFinalPortal(portal, duration, owner)
  if not portal or not portal.Parent then return end
  -- Duplicate JUST the visuals, like falsePortalExitShake. Hide the original
  -- locally and restore it before the existing ClosePortal implementation.
@@ -2065,13 +2067,13 @@ end
 -- The front/back bubble image tints are intentionally left alone.
 C.TERMINAL_GREEN = portalSetting("TERMINAL_GREEN", Color3.fromRGB(26,255,0))
 C.TERMINAL_GREEN_DIM = portalSetting("TERMINAL_GREEN_DIM", Color3.fromRGB(43,200,0))
-local function MakeTerminalPortalGreen(portal)
+function H.MakeTerminalPortalGreen(portal)
  -- The one-in-fifty rainbow roll also applies to either terminal portal.
  if portal:GetAttribute("RainbowPortal") then return end
  portal:SetAttribute("EvilMortyTheme", false)
  portal:SetAttribute("TerminalGreen", true)
  for _, item in ipairs(portal:GetDescendants()) do
-  if not IsBubbleSubtree(item,portal) then
+  if not H.IsBubbleSubtree(item,portal) then
    if item:IsA("ImageLabel") or item:IsA("ImageButton") then
     item.ImageColor3 = C.TERMINAL_GREEN_DIM
    elseif item:IsA("BasePart") then item.Color = C.TERMINAL_GREEN_DIM
@@ -2096,7 +2098,7 @@ end
 
 -- Try the actual game's VFX first. If it is absent, load the supplied RBXMX
 -- from the executor's local files. This is visual-only; no server damage.
-local function LoadEffectModel(name, fileName)
+function H.LoadEffectModel(name, fileName)
  local assets = ReplicatedStorage:FindFirstChild("Assets")
  local vfx = assets and assets:FindFirstChild("VFX")
  local existing = vfx and vfx:FindFirstChild(name)
@@ -2180,7 +2182,7 @@ local deathAuraEmitterSpecs = {
  {name="OffCentered Spec 57",texture="rbxassetid://15419161283",attrs={Size_End=1,Size_Envelope=0.5}},
 }
 
-local function HydrateEmitterAttributes(template,specs)
+function H.HydrateEmitterAttributes(template,specs)
  if not template then return end
  local groups={}
  for _,spec in ipairs(specs) do
@@ -2289,7 +2291,7 @@ local PrimeBombDumpProperties = {
  {root="PrimeBombDeathAura",path="Right Leg.Fire19",occurrence=1,properties={["Acceleration"]=Vector3.new(0,0,0),["Brightness"]=10,["Color"]=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.new(1,0.396078,0.27451)),ColorSequenceKeypoint.new(1,Color3.new(1,0.396078,0.27451))}),["Drag"]=0,["EmissionDirection"]=Enum.NormalId.Top,["FlipbookBlendFrames"]=true,["FlipbookFramerate"]=NumberRange.new(16,16),["FlipbookLayout"]=Enum.ParticleFlipbookLayout.Custom,["FlipbookMode"]=Enum.ParticleFlipbookMode.OneShot,["FlipbookStartRandom"]=false,["Lifetime"]=NumberRange.new(0.4,0.7),["LightEmission"]=-1,["LightInfluence"]=0,["LockedToPart"]=true,["Orientation"]=Enum.ParticleOrientation.FacingCamera,["Rate"]=5,["RotSpeed"]=NumberRange.new(0,0),["Rotation"]=NumberRange.new(0,0),["Shape"]=Enum.ParticleEmitterShape.Box,["ShapeInOut"]=Enum.ParticleEmitterShapeInOut.Outward,["ShapePartial"]=1,["ShapeStyle"]=Enum.ParticleEmitterShapeStyle.Volume,["Size"]=NumberSequence.new({NumberSequenceKeypoint.new(0,0,0.5),NumberSequenceKeypoint.new(0.0617071,0.17315,0.5),NumberSequenceKeypoint.new(0.12693,0.343893,0.5),NumberSequenceKeypoint.new(0.162264,0.427249,0.5),NumberSequenceKeypoint.new(0.200324,0.508357,0.5),NumberSequenceKeypoint.new(0.241846,0.586266,0.5),NumberSequenceKeypoint.new(0.287501,0.65978,0.5),NumberSequenceKeypoint.new(0.337754,0.727533,0.5),NumberSequenceKeypoint.new(0.392709,0.788179,0.5),NumberSequenceKeypoint.new(0.452035,0.840691,0.5),NumberSequenceKeypoint.new(0.515043,0.884609,0.5),NumberSequenceKeypoint.new(0.58088,0.920092,0.5),NumberSequenceKeypoint.new(0.648722,0.947775,0.5),NumberSequenceKeypoint.new(0.717898,0.968541,0.5),NumberSequenceKeypoint.new(0.787908,0.983325,0.5),NumberSequenceKeypoint.new(0.858403,0.993004,0.5),NumberSequenceKeypoint.new(0.929151,0.998345,0.5),NumberSequenceKeypoint.new(1,1,0.5)}),["Speed"]=NumberRange.new(0.001,0.001),["SpreadAngle"]=Vector2.new(0,0),["Squash"]=NumberSequence.new({NumberSequenceKeypoint.new(0,0,0),NumberSequenceKeypoint.new(1,0,0)}),["Texture"]="rbxassetid://16847032740",["TimeScale"]=1,["Transparency"]=NumberSequence.new({NumberSequenceKeypoint.new(0,0,0),NumberSequenceKeypoint.new(1,0,0)}),["VelocityInheritance"]=0,["WindAffectsDrag"]=false,["ZOffset"]=0.10000000149011612}},
  {root="PrimeBombDeathAura",path="Right Leg.OffCentered Spec 57",occurrence=1,properties={["Acceleration"]=Vector3.new(0,5,0),["Brightness"]=10,["Color"]=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.new(1,0.396078,0.27451)),ColorSequenceKeypoint.new(1,Color3.new(1,0.396078,0.27451))}),["Drag"]=0,["EmissionDirection"]=Enum.NormalId.Top,["FlipbookBlendFrames"]=true,["FlipbookFramerate"]=NumberRange.new(16,16),["FlipbookLayout"]=Enum.ParticleFlipbookLayout.None,["FlipbookMode"]=Enum.ParticleFlipbookMode.OneShot,["FlipbookStartRandom"]=false,["Lifetime"]=NumberRange.new(0.6,1.6),["LightEmission"]=-1,["LightInfluence"]=0,["LockedToPart"]=false,["Orientation"]=Enum.ParticleOrientation.FacingCamera,["Rate"]=10,["RotSpeed"]=NumberRange.new(-100,100),["Rotation"]=NumberRange.new(-360,360),["Shape"]=Enum.ParticleEmitterShape.Box,["ShapeInOut"]=Enum.ParticleEmitterShapeInOut.Outward,["ShapePartial"]=1,["ShapeStyle"]=Enum.ParticleEmitterShapeStyle.Volume,["Size"]=NumberSequence.new({NumberSequenceKeypoint.new(0,1,0.6875),NumberSequenceKeypoint.new(1,0,0)}),["Speed"]=NumberRange.new(0.001,0.001),["SpreadAngle"]=Vector2.new(360,360),["Squash"]=NumberSequence.new({NumberSequenceKeypoint.new(0,0,0),NumberSequenceKeypoint.new(1,0,0)}),["Texture"]="rbxassetid://15419161283",["TimeScale"]=1,["Transparency"]=NumberSequence.new({NumberSequenceKeypoint.new(0,0,0),NumberSequenceKeypoint.new(1,0,0)}),["VelocityInheritance"]=0,["WindAffectsDrag"]=false,["ZOffset"]=0.10000000149011612}},
 }
-local function RestorePrimeBombDumpProperties(template, rootName)
+function H.RestorePrimeBombDumpProperties(template, rootName)
  if not template then return end
  local byPath, restored = {}, 0
  local function walk(parent, prefix)
@@ -2323,8 +2325,8 @@ end
 
 -- Keep pristine game assets untouched. Hydrate private, unparented copies only.
 -- These are templates, NOT active effects; the bomb ending clones them on demand.
-local function MakePrimeVfxTemplate(name, fileName, specs)
- local source = LoadEffectModel(name,fileName)
+function H.MakePrimeVfxTemplate(name, fileName, specs)
+ local source = H.LoadEffectModel(name,fileName)
  if not source then
   warn("[PrimeBomb] Missing VFX template:",name)
   return nil
@@ -2332,8 +2334,8 @@ local function MakePrimeVfxTemplate(name, fileName, specs)
  local template = source:Clone()
  template.Name = name .. "_LocalTemplate"
  template.Parent = nil
- HydrateEmitterAttributes(template,specs)
- RestorePrimeBombDumpProperties(template,name)
+ H.HydrateEmitterAttributes(template,specs)
+ H.RestorePrimeBombDumpProperties(template,name)
  -- Templates must not run particle emissions before they are spawned.
  for _,item in ipairs(template:GetDescendants()) do
   if item:IsA("ParticleEmitter") then item.Enabled = false end
@@ -2341,12 +2343,12 @@ local function MakePrimeVfxTemplate(name, fileName, specs)
  return template
 end
 
-local primeExplosionTemplate = MakePrimeVfxTemplate(
+local primeExplosionTemplate = H.MakePrimeVfxTemplate(
  "PrimeBombExplosion",C.PRIME_BOMB_EXPLOSION_FILE,explosionEmitterSpecs)
-local primeAuraTemplate = MakePrimeVfxTemplate(
+local primeAuraTemplate = H.MakePrimeVfxTemplate(
  "PrimeBombDeathAura",C.PRIME_BOMB_DEATH_AURA_FILE,deathAuraEmitterSpecs)
 
-local function TryLoadModule(folder, name)
+function H.TryLoadModule(folder, name)
  local mod=folder and folder:FindFirstChild(name)
  if not (mod and mod:IsA("ModuleScript")) then return nil end
  local ok,result=pcall(require,mod)
@@ -2357,16 +2359,16 @@ end
 local modules=ReplicatedStorage:FindFirstChild("Modules")
 local client=modules and modules:FindFirstChild("Client")
 local utilities=modules and modules:FindFirstChild("Utilities")
-local gamePrimeBombExplosion=TryLoadModule(client,"primeBombExplosion")
-local gamePrimeBombDeathAura=TryLoadModule(client,"primeBombDeathAura")
-local gameVfxDispatcher=TryLoadModule(utilities,"vfxDispatcher")
+local gamePrimeBombExplosion=H.TryLoadModule(client,"primeBombExplosion")
+local gamePrimeBombDeathAura=H.TryLoadModule(client,"primeBombDeathAura")
+local gameVfxDispatcher=H.TryLoadModule(utilities,"vfxDispatcher")
 
 -- Texture asset diagnostics: exported RBXMX keeps references, but it cannot
 -- grant access to private Roblox image assets. Preload so we can report failures
 -- and switch to a reliable procedural flash instead of blank/default sprites.
 local unavailableVfxTextures = {}
 local vfxTexturesChecked = false
-local function TextureUnavailable(asset)
+function H.TextureUnavailable(asset)
  if unavailableVfxTextures[asset] then return true end
  local ok, status = pcall(function() return ContentProvider:GetAssetFetchStatus(asset) end)
  return ok and status == Enum.AssetFetchStatus.Failure
@@ -2405,7 +2407,7 @@ end)
 
 -- Texture-free, locally rendered neon blast. This provides a recognizable
 -- effect even if the source game's sprites are private/inaccessible.
-local function EmitProceduralPrimeBlast(position, strengthen)
+function H.EmitProceduralPrimeBlast(position, strengthen)
  local parent=Instance.new("Folder")
  parent.Name="PrimeBombReliableBlast"
  parent.Parent=Workspace:FindFirstChild("VFXLive") or Workspace
@@ -2454,14 +2456,14 @@ local function EmitProceduralPrimeBlast(position, strengthen)
  end
 end
 
-local function EmitFromAttributes(vfx)
+function H.EmitFromAttributes(vfx)
  -- Fallback uses the emitter's saved texture, Size/Color/Transparency curves,
  -- and attributes. Old code used guessed counts of 14-30 particles, which
  -- overwhelmed effects with intended EmitCount values of 1-5.
  for _,emitter in ipairs(vfx:GetDescendants()) do
   if emitter:IsA("ParticleEmitter") then
    emitter.Enabled=false
-   if emitter.Texture=="" or TextureUnavailable(emitter.Texture) then
+   if emitter.Texture=="" or H.TextureUnavailable(emitter.Texture) then
     -- An inaccessible texture produces default-looking squares/circles.
     -- The guaranteed geometry-based blast below replaces those visuals.
     continue
@@ -2490,7 +2492,7 @@ local function EmitFromAttributes(vfx)
  end
 end
 
-local function PositionPrimeGroundFx(vfx,hit)
+function H.PositionPrimeGroundFx(vfx,hit)
  local anchor=vfx:FindFirstChild("Anchor",true)
  local blast=anchor and anchor:FindFirstChild("Explosion")
  if not blast then return end
@@ -2514,7 +2516,7 @@ local function PositionPrimeGroundFx(vfx,hit)
  end
 end
 
-local function EmitPrimeBombExplosion(position,hit)
+function H.EmitPrimeBombExplosion(position,hit)
  -- Path A: invoke the exact original client effect, if this game provides it.
  -- Its vfxDispatcher restores runtime emitter properties and authored curves.
  if type(gamePrimeBombExplosion)=="function" then
@@ -2528,7 +2530,7 @@ local function EmitPrimeBombExplosion(position,hit)
  end
  if not primeExplosionTemplate then
   warn("[PrimeBomb] PrimeBombExplosion asset unavailable: rendering guaranteed procedural shockwave.")
-  EmitProceduralPrimeBlast(position,true)
+  H.EmitProceduralPrimeBlast(position,true)
   return
  end
  local vfx=primeExplosionTemplate:Clone()
@@ -2549,7 +2551,7 @@ local function EmitPrimeBombExplosion(position,hit)
   end
  end
  vfx.Parent=Workspace:FindFirstChild("VFXLive") or Workspace
- PositionPrimeGroundFx(vfx,hit)
+ H.PositionPrimeGroundFx(vfx,hit)
  if prepared and type(gameVfxDispatcher.emit)=="function" then
   local ok,err=pcall(function()
    gameVfxDispatcher.emit(vfx,{destroyOnFinish=true,minimumLifetime=6.5,fallbackLifetime=8})
@@ -2559,14 +2561,14 @@ local function EmitPrimeBombExplosion(position,hit)
  end
  -- Path C: respect the provided RBXMX's serialized sequences and counts.
  print("[PrimeBomb] VFX path: bundled emitters + procedural shockwave (textures checked:",vfxTexturesChecked,")")
- EmitFromAttributes(vfx)
- EmitProceduralPrimeBlast(position,true)
+ H.EmitFromAttributes(vfx)
+ H.EmitProceduralPrimeBlast(position,true)
  Debris:AddItem(vfx,8)
 end
 
 -- The dump has exactly three particle types for each of the six R6 limbs.
 -- Use the hydrated template directly, so the original visual settings survive.
-local function EmitPrimeBombDeathAura(model)
+function H.EmitPrimeBombDeathAura(model)
  if not model or not model.Parent or not primeAuraTemplate then return end
  local affected = 0
  for _, fxFolder in ipairs(primeAuraTemplate:GetChildren()) do
@@ -2595,14 +2597,14 @@ local function EmitPrimeBombDeathAura(model)
  print("[PrimeBomb] Death aura applied:", model.Name, affected, "emitters")
 end
 
-local function MakeFinalUprightPortal(model, portalCenter, outwardNormal)
- local portal,root=CreatePortal(model)
+function H.MakeFinalUprightPortal(model, portalCenter, outwardNormal)
+ local portal,root=H.CreatePortal(model)
  if not portal then return end
  portal.Name="FinalDimensionPortal"
  portal:SetAttribute("FinalDimensionPortal",true)
- MakeTerminalPortalGreen(portal)
- PlacePortal(portal,root,portalCenter,outwardNormal)
- local face=GetVisibleFace(root)
+ H.MakeTerminalPortalGreen(portal)
+ H.PlacePortal(portal,root,portalCenter,outwardNormal)
+ local face=H.GetVisibleFace(root)
  local panelUp=(face==Enum.NormalId.Top or face==Enum.NormalId.Bottom)
   and root.CFrame.LookVector or root.CFrame.UpVector
  panelUp -= outwardNormal*panelUp:Dot(outwardNormal)
@@ -2616,7 +2618,7 @@ local function MakeFinalUprightPortal(model, portalCenter, outwardNormal)
  return portal,root
 end
 
-local function HoldModelInsidePortal(model, portalCenter, normal)
+function H.HoldModelInsidePortal(model, portalCenter, normal)
  -- Hide and suspend the ragdoll during the five-second cartoon machinery
  -- sequence. Return a restore function for the eventual ejection.
  local old={}
@@ -2643,12 +2645,12 @@ local function HoldModelInsidePortal(model, portalCenter, normal)
 end
 
 -- Shared across ordinary chains, active terminals, and bomb shockwaves.
-local StopOpaqueBypass -- defined below, after the terminal handlers
+H.StopOpaqueBypass = nil -- defined below, after the terminal handlers
 local activeFlows = setmetatable({}, {__mode="k"})
 local activeOpaqueRestores = setmetatable({}, {__mode="k"})
 
-local function RunBlenderPortal(model)
- local body=GetBodyPart(model)
+function H.RunBlenderPortal(model)
+ local body=H.GetBodyPart(model)
  if not body then return end
  local camera=Workspace.CurrentCamera
  local look=camera and camera.CFrame.LookVector or body.CFrame.LookVector
@@ -2665,21 +2667,21 @@ local function RunBlenderPortal(model)
   portalCenter=Vector3.new(portalCenter.X,ground.Position.Y+4,portalCenter.Z)
  end
  local outwardNormal=-flat
- local portal,root=MakeFinalUprightPortal(model,portalCenter,outwardNormal)
+ local portal,root=H.MakeFinalUprightPortal(model,portalCenter,outwardNormal)
  if not portal then return end
- PlayPortalSound(C.AUDIO.Open,portal)
- task.spawn(ElasticPortalIntro,portal,root)
+ H.PlayPortalSound(C.AUDIO.Open,portal)
+ task.spawn(H.ElasticPortalIntro,portal,root)
  task.wait(C.FINAL_PORTAL_OPEN_WAIT)
  if not model.Parent or model:GetAttribute("BombCharred") then
-  task.spawn(ClosePortal,portal,nil)
+  task.spawn(H.ClosePortal,portal,nil)
   return
  end
- local restoreCollisions=DisableCollision(model)
+ local restoreCollisions=H.DisableCollision(model)
  local prev=body.Position
  local began=os.clock()
  local crossed=false
  while model.Parent and portal.Parent and os.clock()-began<C.FINAL_SUCTION_MAX_DURATION do
-  body=GetBodyPart(model)
+  body=H.GetBodyPart(model)
   if not body then break end
   local dt=RunService.Heartbeat:Wait()
   local current=body.Position
@@ -2696,23 +2698,23 @@ local function RunBlenderPortal(model)
   local delta=aim-current
   if delta.Magnitude>0.02 then
    local velocity=delta.Unit*math.min(C.FINAL_SUCTION_MAX_SPEED,math.max(28,delta.Magnitude*15))
-   SetRagdollVelocity(model,body.AssemblyLinearVelocity:Lerp(velocity,math.clamp(dt*C.FINAL_SUCTION_RESPONSE,0,1)))
+   H.SetRagdollVelocity(model,body.AssemblyLinearVelocity:Lerp(velocity,math.clamp(dt*C.FINAL_SUCTION_RESPONSE,0,1)))
   end
   prev=current
  end
  if model:GetAttribute("BombCharred") then
-  task.spawn(ClosePortal,portal,nil)
+  task.spawn(H.ClosePortal,portal,nil)
   return
  end
  if model.Parent then
-  PlayPortalSound(C.AUDIO.Enter,portal)
-  local restoreHold=HoldModelInsidePortal(model,portalCenter,outwardNormal)
+  H.PlayPortalSound(C.AUDIO.Enter,portal)
+  local restoreHold=H.HoldModelInsidePortal(model,portalCenter,outwardNormal)
   -- Slowly chew for five seconds; the supplied old shake visual remains.
-  task.spawn(SpillPortalBloodDuringShake,portal,C.FINAL_PORTAL_SHAKE_DURATION)
-  ShakeFinalPortal(portal,C.FINAL_PORTAL_SHAKE_DURATION,model)
+  task.spawn(H.SpillPortalBloodDuringShake,portal,C.FINAL_PORTAL_SHAKE_DURATION)
+  H.ShakeFinalPortal(portal,C.FINAL_PORTAL_SHAKE_DURATION,model)
   if model:GetAttribute("BombCharred") or not model.Parent then
    -- Blast won the race against this blender ending; never eject/restart it.
-   if portal.Parent then task.spawn(ClosePortal,portal,nil) end
+   if portal.Parent then task.spawn(H.ClosePortal,portal,nil) end
    return
   end
   if model.Parent then
@@ -2722,7 +2724,7 @@ local function RunBlenderPortal(model)
    restoreCollisions()
    -- Ejected body must collide again; remove all locally-added pass-through
    -- constraints before applying velocity. Keep HRP intangible as usual.
-   StopOpaqueBypass(model)
+   H.StopOpaqueBypass(model)
    for _, piece in ipairs(model:GetDescendants()) do
     if piece:IsA("BasePart") then
      piece.Anchored=false
@@ -2731,18 +2733,18 @@ local function RunBlenderPortal(model)
      piece.CanQuery=true
     end
    end
-   SetRagdollVelocity(model,outwardNormal*C.FINAL_EJECT_SPEED
+   H.SetRagdollVelocity(model,outwardNormal*C.FINAL_EJECT_SPEED
     +Vector3.new(math.random(-24,24),math.random(12,30),math.random(-24,24)))
    -- Release separate Roblox pieces, then briefly emit cartoon fluid only
    -- from the points where the pieces were attached to the remaining model.
-   local fluidSites = TearOffRandomLimbs(model,C.FINAL_BLOOD_COLOR,outwardNormal)
-   StartBlenderExitFluid(model,fluidSites)
-   if portal:GetAttribute("RainbowPortal") then StartRainbowRagdoll(model) end
+   local fluidSites = H.TearOffRandomLimbs(model,C.FINAL_BLOOD_COLOR,outwardNormal)
+   H.StartBlenderExitFluid(model,fluidSites)
+   if portal:GetAttribute("RainbowPortal") then H.StartRainbowRagdoll(model) end
   end
  else
   restoreCollisions()
  end
- if portal.Parent then ClosePortal(portal,nil) end
+ if portal.Parent then H.ClosePortal(portal,nil) end
  if model.Parent then Debris:AddItem(model,C.FINAL_RAGDOLL_CLEANUP_DELAY) end
 end
 
@@ -2750,7 +2752,7 @@ end
 -- Bomb impact operates on Roblox ragdoll Models only, never live Player
 -- characters or the world's collision settings. The black appearance and
 -- temporary cleanup are purely client-side effects in this script.
-local function CharBombRagdoll(model)
+function H.CharBombRagdoll(model)
  if not model or not model.Parent or not model:IsA("Model") then return false end
  if model:GetAttribute("BombCharred") then return true end
  -- Set the terminal state FIRST, so concurrent entry, clone, and watchdog
@@ -2761,7 +2763,7 @@ local function CharBombRagdoll(model)
  model:SetAttribute("FinalPortalKind", "bomb")
  local flow = activeFlows[model]
  if flow then flow.finalizing = true end
- if StopOpaqueBypass then StopOpaqueBypass(model) end
+ if H.StopOpaqueBypass then H.StopOpaqueBypass(model) end
  for _, item in ipairs(model:GetDescendants()) do
   if item:IsA("BodyColors") or item:IsA("Shirt") or item:IsA("Pants")
    or item:IsA("ShirtGraphic") or item:IsA("Decal") or item:IsA("Texture")
@@ -2786,7 +2788,7 @@ local function CharBombRagdoll(model)
  return true
 end
 
-local function ApplyBombShockwave(blastAt, primaryTarget)
+function H.ApplyBombShockwave(blastAt, primaryTarget)
  local candidates = {}
  -- Always affect the target, even if physics moved it away during arming.
  if primaryTarget and primaryTarget.Parent then
@@ -2794,22 +2796,22 @@ local function ApplyBombShockwave(blastAt, primaryTarget)
  end
  for _, ragdoll in ipairs(RAGDOLLS_FOLDER:GetChildren()) do
   if ragdoll:IsA("Model") and ragdoll.Parent then
-   local body = GetBodyPart(ragdoll)
+   local body = H.GetBodyPart(ragdoll)
    if body and (body.Position - blastAt).Magnitude <= C.BOMB_BLAST_RADIUS then
     candidates[ragdoll] = true
    end
   end
  end
  for ragdoll in pairs(candidates) do
-  local body = GetBodyPart(ragdoll)
-  if body and CharBombRagdoll(ragdoll) then
+  local body = H.GetBodyPart(ragdoll)
+  if body and H.CharBombRagdoll(ragdoll) then
    local delta = body.Position - blastAt
    local dist = delta.Magnitude
    local strength = (ragdoll == primaryTarget) and 1
     or math.clamp(1 - dist/C.BOMB_BLAST_RADIUS, 0.22, 1)
    local direction = Vector3.new(delta.X, math.max(delta.Y, 0) + 5, delta.Z)
    if direction.Magnitude < 0.05 then direction = Vector3.yAxis end
-   SetRagdollVelocity(ragdoll,
+   H.SetRagdollVelocity(ragdoll,
     direction.Unit * (C.BOMB_SHOCKWAVE_SPEED * strength)
     + Vector3.yAxis * (C.BOMB_SHOCKWAVE_LIFT * strength))
    local assemblies = {}
@@ -2838,15 +2840,15 @@ local function ApplyBombShockwave(blastAt, primaryTarget)
    -- former Roblox joint points. This does not create wounds or physical gore.
    if math.random() < C.BOMB_PART_SEPARATION_CHANCE then
     local sprayDirection=direction.Magnitude>0.01 and direction.Unit or Vector3.yAxis
-    local sites=TearOffRandomLimbs(ragdoll,C.BLENDER_EXIT_FLUID_COLOR,sprayDirection)
-    StartBlenderExitFluid(ragdoll,sites,true,C.BOMB_SEPARATION_FLUID_DURATION)
+    local sites=H.TearOffRandomLimbs(ragdoll,C.BLENDER_EXIT_FLUID_COLOR,sprayDirection)
+    H.StartBlenderExitFluid(ragdoll,sites,true,C.BOMB_SEPARATION_FLUID_DURATION)
    end
-   EmitPrimeBombDeathAura(ragdoll)
+   H.EmitPrimeBombDeathAura(ragdoll)
   end
  end
 end
 
-local function CreateTerminalBomb(position)
+function H.CreateTerminalBomb(position)
  local bomb=Instance.new("Part")
  bomb.Name="FinalDimensionBomb"
  bomb.Shape=Enum.PartType.Ball
@@ -2878,31 +2880,31 @@ local function CreateTerminalBomb(position)
  return bomb,indicator
 end
 
-local function RunBombPortal(model)
+function H.RunBombPortal(model)
  if not model.Parent or model:GetAttribute("BombCharred") then return end
- local body=GetBodyPart(model)
+ local body=H.GetBodyPart(model)
  if not body then return end
  local function canceled()
   return not model.Parent or model:GetAttribute("BombCharred")
  end
  -- Horizontal portal exactly five studs above the current ragdoll.
  local center=body.Position+Vector3.yAxis*C.BOMB_OVERHEAD_HEIGHT
- local portal,root=CreatePortal(model)
+ local portal,root=H.CreatePortal(model)
  if not portal then return end
  portal.Name="TerminalBombPortal"
  portal:SetAttribute("FinalDimensionPortal",true)
- MakeTerminalPortalGreen(portal)
- PlacePortal(portal,root,center,-Vector3.yAxis)
- PlayPortalSound(C.AUDIO.Open,portal)
- task.spawn(ElasticPortalIntro,portal,root)
+ H.MakeTerminalPortalGreen(portal)
+ H.PlacePortal(portal,root,center,-Vector3.yAxis)
+ H.PlayPortalSound(C.AUDIO.Open,portal)
+ task.spawn(H.ElasticPortalIntro,portal,root)
  task.wait(C.FINAL_PORTAL_OPEN_WAIT)
  if canceled() then
-  if portal.Parent then task.spawn(ClosePortal,portal,nil) end
+  if portal.Parent then task.spawn(H.ClosePortal,portal,nil) end
   return
  end
  if not portal.Parent then return end
  -- Spawn the bomb just beneath the portal's horizontal opening.
- local bomb,indicator=CreateTerminalBomb(center-Vector3.yAxis*1.2)
+ local bomb,indicator=H.CreateTerminalBomb(center-Vector3.yAxis*1.2)
  -- Arming audio starts once, using ticking.mp3\n PlayTerminalBombSound(bomb.Position,false,1)
  local bombStart=os.clock()
  task.wait(C.BOMB_DROP_SETTLE)
@@ -2912,7 +2914,7 @@ local function RunBombPortal(model)
  while bomb.Parent and os.clock()-armedAt<C.BOMB_ARM_TIME and not canceled() do
   local elapsed=os.clock()-armedAt
   if elapsed>=nextBeepAt then
-   PlayTerminalBombSound(bomb.Position,false,1+elapsed/C.BOMB_ARM_TIME*0.6)
+   H.PlayTerminalBombSound(bomb.Position,false,1+elapsed/C.BOMB_ARM_TIME*0.6)
    nextBeepAt=elapsed+C.BOMB_BEEP_INTERVAL
   end
   if indicator.Parent then
@@ -2925,7 +2927,7 @@ local function RunBombPortal(model)
  if canceled() then
   if indicator.Parent then indicator:Destroy() end
   if bomb.Parent then bomb:Destroy() end
-  if portal.Parent then task.spawn(ClosePortal,portal,nil) end
+  if portal.Parent then task.spawn(H.ClosePortal,portal,nil) end
   return
  end
  local blastAt=bomb.Parent and bomb.Position or center-Vector3.yAxis*2
@@ -2936,22 +2938,22 @@ local function RunBombPortal(model)
  ray.FilterDescendantsInstances={model,RAGDOLLS_FOLDER,portal,fluidFolder}
  ray.RespectCanCollide=true
  local ground=Workspace:Raycast(blastAt+Vector3.yAxis*2,Vector3.new(0,-22,0),ray)
- EmitPrimeBombExplosion(blastAt,ground)
- PlayTerminalBombSound(blastAt,true,1)
+ H.EmitPrimeBombExplosion(blastAt,ground)
+ H.PlayTerminalBombSound(blastAt,true,1)
  -- Visually char and propel every nearby ragdoll, including mid-chain clones.
  -- CharBombRagdoll stops each chain before applying shockwave velocity.
- ApplyBombShockwave(blastAt,model)
- if portal.Parent then ClosePortal(portal,nil) end
+ H.ApplyBombShockwave(blastAt,model)
+ if portal.Parent then H.ClosePortal(portal,nil) end
 end
 
-local function RunFinalPortalSequence(model,flow)
+function H.RunFinalPortalSequence(model,flow)
  if not model.Parent then return end
  local chosen=flow.terminalKind or (math.random()<C.TERMINAL_BOMB_CHANCE and "bomb" or "blender")
  model:SetAttribute("FinalPortalKind",chosen)
  if chosen=="bomb" then
-  RunBombPortal(model)
+  H.RunBombPortal(model)
  else
-  RunBlenderPortal(model)
+  H.RunBlenderPortal(model)
  end
  if model.Parent then model:SetAttribute("FinalPortalCompleted",true) end
 end
@@ -2959,7 +2961,7 @@ end
 -- END FINAL ONE-WAY PORTAL ---------------------------------------------------
 
 local processing = {}
-StopOpaqueBypass = function(model)
+H.StopOpaqueBypass = function(model)
  local restore=activeOpaqueRestores[model]
  activeOpaqueRestores[model]=nil
  if restore then restore() end
@@ -2967,7 +2969,7 @@ StopOpaqueBypass = function(model)
  local inherited=model:FindFirstChild("PortalOpaquePassThrough")
  if inherited then inherited:Destroy() end
 end
-local function BeginTerminalSequence(model,flow,reason)
+function H.BeginTerminalSequence(model,flow,reason)
  if not model or not model.Parent or model:GetAttribute("FinalPortalTriggered") then return false end
  -- A clone may have exhausted ordinary hops before its 20s expiration;
  -- terminal playback must still work even when that hop loop has ended.
@@ -2975,14 +2977,14 @@ local function BeginTerminalSequence(model,flow,reason)
  if flow.finalizing then return false end
  activeFlows[model]=flow
  -- The ejecting ragdoll must collide with the map again, unlike chain ragdolls.
- StopOpaqueBypass(model)
+ H.StopOpaqueBypass(model)
  flow.finalizing=true
  flow.terminalKind=(math.random()<C.TERMINAL_BOMB_CHANCE) and "bomb" or "blender"
  model:SetAttribute("FinalPortalTriggered",true)
  model:SetAttribute("FinalPortalCompleted",false)
  model:SetAttribute("FinalPortalReason",reason)
  task.spawn(function()
-  local ok,err=pcall(RunFinalPortalSequence,model,flow)
+  local ok,err=pcall(H.RunFinalPortalSequence,model,flow)
   if not ok then
    warn("[Portal] Terminal sequence failed:",err)
    if model.Parent then Debris:AddItem(model,2) end
@@ -2992,9 +2994,9 @@ local function BeginTerminalSequence(model,flow,reason)
 end
 local activeClones, totalClones = 0, 0
 local cloneExpiry = setmetatable({}, {__mode = "k"})
-local ProcessRagdoll
+H.ProcessRagdoll = nil
 
-local function SpawnChainClone(source)
+function H.SpawnChainClone(source)
  if activeClones >= C.MAX_ACTIVE_CLONES or totalClones >= C.MAX_TOTAL_CLONES then return end
  if not source.Parent or source:GetAttribute("FinalPortalTriggered") or source:GetAttribute("BombCharred") then return end
  local oldArchivable = source.Archivable
@@ -3019,13 +3021,13 @@ local function SpawnChainClone(source)
  clone:PivotTo(pivot * CFrame.new(math.random(-3,3), 1.5, math.random(-3,3)))
  cloneExpiry[clone] = os.clock() + C.CLONE_LIFETIME
  clone.Parent = RAGDOLLS_FOLDER
- task.spawn(ProcessRagdoll, clone)
+ task.spawn(H.ProcessRagdoll, clone)
  -- Expired clones get an animated terminal portal, never silent deletion.
  task.delay(C.CLONE_LIFETIME, function()
-  if clone.Parent then BeginTerminalSequence(clone,activeFlows[clone],"clone_lifetime") end
+  if clone.Parent then H.BeginTerminalSequence(clone,activeFlows[clone],"clone_lifetime") end
  end)
  task.delay(C.CLONE_FAILSAFE_TIME, function()
-  if clone.Parent then BeginTerminalSequence(clone,activeFlows[clone],"clone_failsafe") end
+  if clone.Parent then H.BeginTerminalSequence(clone,activeFlows[clone],"clone_failsafe") end
  end)
  clone.Destroying:Once(function()
   activeClones = math.max(0, activeClones - 1)
@@ -3037,48 +3039,48 @@ end
 -- After its first actual crossing, only airborne pairs are used.
 -- This intentionally reuses the same predictive ground entry and 2.5s
 -- rescue logic as ordinary portal chains; no timer-based teleport.
-local function EnterStartingGroundPortal(model,flow)
- local body=GetBodyPart(model)
+function H.EnterStartingGroundPortal(model,flow)
+ local body=H.GetBodyPart(model)
  if not body or flow.finalizing then return false end
- local ground=PredictGroundImpact(model,body) or GetGround(model,body)
+ local ground=H.PredictGroundImpact(model,body) or H.GetGround(model,body)
  if not ground or ground.Normal.Y<0.65 then return false end
  local position,normal=ground.Position,ground.Normal
- local portal,root=CreatePortal(model)
+ local portal,root=H.CreatePortal(model)
  if not portal then return false end
  portal.Name="RagdollPortal"
  portal:SetAttribute("GroundLocked",true)
- PlacePortal(portal,root,position,normal)
+ H.PlacePortal(portal,root,position,normal)
  local tracking={
   position=position,initialPosition=position,normal=normal,
   surface=ground.Instance,moves=0,lastMoveAt=-math.huge,
   lastTeleportAt=flow.lastTeleportAt,flow=flow,opening=true
  }
- PlayPortalSound(C.AUDIO.Open,portal)
+ H.PlayPortalSound(C.AUDIO.Open,portal)
  local stopRotation
  task.spawn(function()
-  ElasticPortalIntro(portal,root,position,normal,ground.Instance,model,function()
+  H.ElasticPortalIntro(portal,root,position,normal,ground.Instance,model,function()
    return tracking.position
   end)
   tracking.opening=false
-  if portal.Parent then stopRotation=StartRotation(portal,portal:GetPivot(),tracking.normal) end
+  if portal.Parent then stopRotation=H.StartRotation(portal,portal:GetPivot(),tracking.normal) end
  end)
- local crossed=WaitForPredictedImpact(model,portal,root,tracking)
+ local crossed=H.WaitForPredictedImpact(model,portal,root,tracking)
  if crossed and model.Parent and not flow.finalizing then
-  PlayPortalSound(C.AUDIO.Enter,portal)
-  if portal:GetAttribute("RainbowPortal") then StartRainbowRagdoll(model) end
+  H.PlayPortalSound(C.AUDIO.Enter,portal)
+  if portal:GetAttribute("RainbowPortal") then H.StartRainbowRagdoll(model) end
   -- The crossing is a genuine entrance; the airborne corridor will open next.
-  task.spawn(ClosePortal,portal,function() if stopRotation then stopRotation() end end)
+  task.spawn(H.ClosePortal,portal,function() if stopRotation then stopRotation() end end)
   return true
  end
- task.spawn(ClosePortal,portal,function() if stopRotation then stopRotation() end end)
+ task.spawn(H.ClosePortal,portal,function() if stopRotation then stopRotation() end end)
  return false
 end
 
 
-ProcessRagdoll = function(model)
+H.ProcessRagdoll = function(model)
  if processing[model] or model:GetAttribute("BombCharred") then return end
  processing[model]=true
- local stopOpaqueCollisions = StartOpaquePassThrough(model)
+ local stopOpaqueCollisions = H.StartOpaquePassThrough(model)
  activeOpaqueRestores[model]=stopOpaqueCollisions
  local ok,err = pcall(function()
   local originalGroundY = nil
@@ -3089,7 +3091,7 @@ ProcessRagdoll = function(model)
   task.spawn(function()
    while model.Parent and not flow.finalizing do
     if os.clock()-flow.lastTeleportAt>=C.FINAL_PORTAL_STALL_TIME then
-     BeginTerminalSequence(model,flow,"no_teleport_5s")
+     H.BeginTerminalSequence(model,flow,"no_teleport_5s")
      break
     end
     RunService.Heartbeat:Wait()
@@ -3099,29 +3101,29 @@ ProcessRagdoll = function(model)
   local airOnly = math.random() < C.AIR_ONLY_LIFETIME_CHANCE
   local airOnlyInitialGroundEntered=false
   model:SetAttribute("PortalAirOnly", airOnly)
-  if model:GetAttribute("RainbowRagdoll") then StartRainbowRagdoll(model) end
+  if model:GetAttribute("RainbowRagdoll") then H.StartRainbowRagdoll(model) end
   while model.Parent and not flow.finalizing and (cloneExpiry[model] or completedHops < C.MAX_PORTAL_HOPS) do
    if not model.Parent then break end
-   local body=GetBodyPart(model)
+   local body=H.GetBodyPart(model)
    if not body then break end
 
    if airOnly then
     -- Exactly one real grounded starting portal. The next portals are floating.
     if not airOnlyInitialGroundEntered then
-     if not EnterStartingGroundPortal(model,flow) then
+     if not H.EnterStartingGroundPortal(model,flow) then
       RunService.Heartbeat:Wait()
       continue
      end
      airOnlyInitialGroundEntered=true
      if flow.finalizing or not model.Parent then break end
-     body=GetBodyPart(model)
+     body=H.GetBodyPart(model)
      if not body then break end
     end
     -- Once the initial floor opening is crossed, fly only through air pairs.
-    local first, second, startPos, targetPos = SpawnAirPair(model, body, true)
+    local first, second, startPos, targetPos = H.SpawnAirPair(model, body, true)
     if flow.finalizing then
-     if first then task.spawn(ClosePortal,first,nil) end
-     if second then task.spawn(ClosePortal,second,nil) end
+     if first then task.spawn(H.ClosePortal,first,nil) end
+     if second then task.spawn(H.ClosePortal,second,nil) end
      break
     end
     if not first then
@@ -3131,28 +3133,28 @@ ProcessRagdoll = function(model)
      continue
     end
     local rainbowAfterAir=first:GetAttribute("RainbowPortal") or second:GetAttribute("RainbowPortal")
-    local blueAfterAir=not rainbowAfterAir and RollBlueLoopForExit(model,flow)
-    if blueAfterAir then TintBluePortal(second) end
-    local restore = DisableCollision(model)
-    PlayPortalSound(C.AUDIO.Enter, first)
-    local crossed = FlyBetweenAirPortals(model, startPos, targetPos, flow)
+    local blueAfterAir=not rainbowAfterAir and H.RollBlueLoopForExit(model,flow)
+    if blueAfterAir then H.TintBluePortal(second) end
+    local restore = H.DisableCollision(model)
+    H.PlayPortalSound(C.AUDIO.Enter, first)
+    local crossed = H.FlyBetweenAirPortals(model, startPos, targetPos, flow)
     restore()
     if crossed and model.Parent and not flow.finalizing then
-     PlayPortalSound(C.AUDIO.Enter, second)
-     if rainbowAfterAir then StartRainbowRagdoll(model) end
+     H.PlayPortalSound(C.AUDIO.Enter, second)
+     if rainbowAfterAir then H.StartRainbowRagdoll(model) end
      completedHops += 1
      flow.lastTeleportAt = os.clock()
      if cloneExpiry[model] and os.clock() >= cloneExpiry[model] then
-      BeginTerminalSequence(model,flow,"clone_lifetime")
+      H.BeginTerminalSequence(model,flow,"clone_lifetime")
      elseif model.Parent and math.random() < C.CLONE_CHANCE then
-      SpawnChainClone(model)
+      H.SpawnChainClone(model)
      end
     end
-    task.spawn(ClosePortal, first, nil)
-    task.spawn(ClosePortal, second, nil)
+    task.spawn(H.ClosePortal, first, nil)
+    task.spawn(H.ClosePortal, second, nil)
     -- A blue-colored second portal signals the upcoming falling detour.
     if crossed and not flow.finalizing then
-     MaybeRunBlueFallingLoop(model,flow,blueAfterAir)
+     H.MaybeRunBlueFallingLoop(model,flow,blueAfterAir)
     end
     if model.Parent then RunService.Heartbeat:Wait() end
     continue
@@ -3160,9 +3162,9 @@ ProcessRagdoll = function(model)
 
    -- No fixed wait and no nearest-ground fallback: a portal is spawned ONLY
    -- after the current trajectory is actually predicted to strike a floor.
-   local ground = PredictGroundImpact(model,body)
+   local ground = H.PredictGroundImpact(model,body)
    if not ground and body.AssemblyLinearVelocity.Y<8 then
-    local nearby=GetGround(model,body)
+    local nearby=H.GetGround(model,body)
     if nearby and (body.Position-nearby.Position).Magnitude<11 then ground=nearby end
    end
    if flow.finalizing then break end
@@ -3176,15 +3178,15 @@ ProcessRagdoll = function(model)
    local support = ground
    local abovePortal = false
    local banishOnEntry = cloneExpiry[model] ~= nil and os.clock() >= cloneExpiry[model]
-   local entrance,root=CreatePortal(model)
+   local entrance,root=H.CreatePortal(model)
    if not entrance then break end
    -- Lock floor entrances to the raycast surface, not the model bounding box.
    entrance:SetAttribute("GroundLocked", not abovePortal)
-   local base=PlacePortal(entrance,root,inPos,inNormal)
+   local base=H.PlacePortal(entrance,root,inPos,inNormal)
    if not abovePortal then
     -- Always check the final model volume, including fallback placements.
     -- Exclude only the actual supporting floor when a valid raycast found one.
-    NudgePortalOutOfObstruction(entrance,model,inPos,inNormal,support and support.Instance or nil)
+    H.NudgePortalOutOfObstruction(entrance,model,inPos,inNormal,support and support.Instance or nil)
     base=entrance:GetPivot()
    end
    local tracking = {
@@ -3196,12 +3198,12 @@ ProcessRagdoll = function(model)
    }
    -- Animate concurrently with prediction tracking: no 0.53s opening pause.
    task.spawn(function()
-    ElasticPortalIntro(entrance,root,inPos,inNormal,support.Instance,model,function()
+    H.ElasticPortalIntro(entrance,root,inPos,inNormal,support.Instance,model,function()
      return tracking.position
     end)
     tracking.opening = false
    end)
-   PlayPortalSound(C.AUDIO.Open, entrance)
+   H.PlayPortalSound(C.AUDIO.Open, entrance)
    -- Rotation starts after opening to avoid fighting the elastic part animation.
    local stopEntrance
    task.spawn(function()
@@ -3209,11 +3211,11 @@ ProcessRagdoll = function(model)
      RunService.Heartbeat:Wait()
     end
     if entrance.Parent then
-     stopEntrance = StartRotation(entrance,entrance:GetPivot(),tracking.normal)
+     stopEntrance = H.StartRotation(entrance,entrance:GetPivot(),tracking.normal)
     end
    end)
-   if not WaitForPredictedImpact(model,entrance,root,tracking) or not model.Parent then
-    task.spawn(ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
+   if not H.WaitForPredictedImpact(model,entrance,root,tracking) or not model.Parent then
+    task.spawn(H.ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
     if not model.Parent then break end
     RunService.Heartbeat:Wait()
     continue
@@ -3222,57 +3224,57 @@ ProcessRagdoll = function(model)
    -- running until a real exit occurs.
    -- Actual final landing point may move as the ragdoll spins/falls.
    inPos, inNormal = tracking.position, tracking.normal
-   body=GetBodyPart(model)
-   if not body then ClosePortal(entrance,function() if stopEntrance then stopEntrance() end end); break end
+   body=H.GetBodyPart(model)
+   if not body then H.ClosePortal(entrance,function() if stopEntrance then stopEntrance() end end); break end
    if flow.finalizing then
-    task.spawn(ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
+    task.spawn(H.ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
     break
    end
    if banishOnEntry or (cloneExpiry[model] and os.clock() >= cloneExpiry[model]) then
-    BeginTerminalSequence(model,flow,"clone_lifetime")
-    task.spawn(ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
+    H.BeginTerminalSequence(model,flow,"clone_lifetime")
+    task.spawn(H.ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
     break
    end
    -- Choose the blue detour before its preceding exit opens, so that
    -- preceding portal is ALREADY blue when the ragdoll exits from it.
-   local blueAfterExit=RollBlueLoopForExit(model,flow)
+   local blueAfterExit=H.RollBlueLoopForExit(model,flow)
    local airFirst,airSecond,airStart,airTarget
    if math.random() < C.MIDAIR_CHAIN_CHANCE then
-    airFirst,airSecond,airStart,airTarget = SpawnAirPair(model,body)
+    airFirst,airSecond,airStart,airTarget = H.SpawnAirPair(model,body)
    end
    -- Capture any rainbow override before asynchronous portal close tasks run.
    local airPairRainbow=airFirst and airSecond and
     (airFirst:GetAttribute("RainbowPortal") or airSecond:GetAttribute("RainbowPortal"))
    local exit,stopExit,exitPos,exitNormal
    if not airFirst then
-    exit,stopExit,exitPos,exitNormal=SpawnExit(model,body,originalGroundY)
-    if not exit then ClosePortal(entrance,function() if stopEntrance then stopEntrance() end end); break end
+    exit,stopExit,exitPos,exitNormal=H.SpawnExit(model,body,originalGroundY)
+    if not exit then H.ClosePortal(entrance,function() if stopEntrance then stopEntrance() end end); break end
    end
-   PlayPortalSound(C.AUDIO.Enter, entrance)
+   H.PlayPortalSound(C.AUDIO.Enter, entrance)
    if airFirst then
     -- Immediate transfer into the first midair exit.
-    PlayPortalSound(C.AUDIO.Enter,airFirst)
-    local reached = FlyBetweenAirPortals(model,airStart,airTarget,flow)
-    if reached then PlayPortalSound(C.AUDIO.Enter,airSecond) end
+    H.PlayPortalSound(C.AUDIO.Enter,airFirst)
+    local reached = H.FlyBetweenAirPortals(model,airStart,airTarget,flow)
+    if reached then H.PlayPortalSound(C.AUDIO.Enter,airSecond) end
     -- If the ballistic throw misses, let the ragdoll keep flying/falling.
     -- The next hop predicts its new landing point; no scripted rescue snap.
-    task.spawn(ClosePortal,airFirst,nil)
-    task.spawn(ClosePortal,airSecond,nil)
+    task.spawn(H.ClosePortal,airFirst,nil)
+    task.spawn(H.ClosePortal,airSecond,nil)
     if reached then
-     exit,stopExit,exitPos,exitNormal=SpawnExit(model,GetBodyPart(model) or body,originalGroundY)
+     exit,stopExit,exitPos,exitNormal=H.SpawnExit(model,H.GetBodyPart(model) or body,originalGroundY)
     else
-     task.spawn(ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
+     task.spawn(H.ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
      if model.Parent then RunService.Heartbeat:Wait() end
      continue
     end
    end
    if flow.finalizing then
-    task.spawn(ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
-    if exit then task.spawn(ClosePortal,exit,stopExit) end
+    task.spawn(H.ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
+    if exit then task.spawn(H.ClosePortal,exit,stopExit) end
     break
    end
    if not exit then
-    ClosePortal(entrance,function() if stopEntrance then stopEntrance() end end)
+    H.ClosePortal(entrance,function() if stopEntrance then stopEntrance() end end)
     break
    end
    -- Any portal involved in this hop can be rainbow, including the floor
@@ -3281,15 +3283,15 @@ ProcessRagdoll = function(model)
     or exit:GetAttribute("RainbowPortal") or airPairRainbow
    -- Rainbow has precedence over a blue-loop detour when rolled on this hop.
    if rainbowAfterExit then blueAfterExit=false end
-   if blueAfterExit then TintBluePortal(exit) end
+   if blueAfterExit then H.TintBluePortal(exit) end
    if C.TRAVEL_TIME > 0 then task.wait(C.TRAVEL_TIME) end
    if model.Parent and not flow.finalizing then
-    local restore=DisableCollision(model)
+    local restore=H.DisableCollision(model)
     local pivot=model:GetPivot()
     model:PivotTo(CFrame.new(exitPos+exitNormal*3)*(pivot-pivot.Position))
     -- Keep ragdoll spin and relative limb velocities. Only reorient the bulk
     -- exit momentum and add a fresh randomized kick; no fixed trajectory.
-    local torso = GetBodyPart(model)
+    local torso = H.GetBodyPart(model)
     local currentVelocity = torso and torso.AssemblyLinearVelocity or Vector3.zero
     local randomLateral = Vector3.new(math.random(-26,26),math.random(3,25),math.random(-26,26))
     local retainedMomentum = currentVelocity.Magnitude > 110
@@ -3309,25 +3311,25 @@ ProcessRagdoll = function(model)
     end
     restore()
     -- Rainbow coloration begins only after the exit teleport is completed.
-    if rainbowAfterExit then StartRainbowRagdoll(model) end
+    if rainbowAfterExit then H.StartRainbowRagdoll(model) end
    end
    if flow.finalizing then
-    task.spawn(ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
-    if exit then task.spawn(ClosePortal,exit,stopExit) end
+    task.spawn(H.ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
+    if exit then task.spawn(H.ClosePortal,exit,stopExit) end
     break
    end
    completedHops += 1
    flow.lastTeleportAt = os.clock()
    -- Clone after the teleport so its own independent chain starts at the exit.
-   if model.Parent and math.random() < C.CLONE_CHANCE then SpawnChainClone(model) end
-   task.spawn(ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
-   task.delay(C.LINGER_TIME,function() ClosePortal(exit,stopExit) end)
+   if model.Parent and math.random() < C.CLONE_CHANCE then H.SpawnChainClone(model) end
+   task.spawn(H.ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
+   task.delay(C.LINGER_TIME,function() H.ClosePortal(exit,stopExit) end)
    -- The previous exit is already blue if this prototype detour was selected.
-   MaybeRunBlueFallingLoop(model,flow,blueAfterExit)
+   H.MaybeRunBlueFallingLoop(model,flow,blueAfterExit)
    if model.Parent then RunService.Heartbeat:Wait() end
   end
  end)
- StopOpaqueBypass(model)
+ H.StopOpaqueBypass(model)
  activeFlows[model]=nil
  if not ok then warn("[Portal Ragdoll] Error:",err) end
  processing[model]=nil
@@ -3335,4 +3337,4 @@ end
 
 -- Ragdoll discovery belongs exclusively to the FunnyRagdolls loader.
 -- All original helpers, physics and timer behavior above are preserved.
-return ProcessRagdoll
+return H.ProcessRagdoll
