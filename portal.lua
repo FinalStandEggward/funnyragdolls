@@ -3139,6 +3139,78 @@ function H.SpawnChainClone(source)
  end)
 end
 
+-- FIRST-EXIT R6 RAGDOLL REASSEMBLY
+-- Rejoins existing separated limbs using the source template's ragdoll attachment names.
+-- Ball sockets preserve floppy ragdoll motion (no rigid Motor6D resurrection).
+C.REPAIR_ON_FIRST_EXIT = portalSetting("REPAIR_ON_FIRST_EXIT", true)
+function H.RepairDismemberedOnFirstExit(model, flow)
+ if not C.REPAIR_ON_FIRST_EXIT or flow.firstExitRepairDone then return end
+ flow.firstExitRepairDone = true
+ if not model or not model.Parent then return end
+ local torso = model:FindFirstChild("Torso")
+ if not torso or not torso:IsA("BasePart") then return end
+ local limbs = {
+  {"Head", "RagdollNeckRoot", "RagdollNeck", Vector3.new(0, 1.5, 0), Vector3.new(0, -0.5, 0)},
+  {"Left Arm", "RagdollLeftArmRoot", "RagdollLeftArm", Vector3.new(-1.5, 0.5, 0), Vector3.new(0.5, 0.5, 0)},
+  {"Right Arm", "RagdollRightArmRoot", "RagdollRightArm", Vector3.new(1.5, 0.5, 0), Vector3.new(-0.5, 0.5, 0)},
+  {"Left Leg", "RagdollLeftLegRoot", "RagdollLeftLeg", Vector3.new(-0.5, -1.5, 0), Vector3.new(0, 0.5, 0)},
+  {"Right Leg", "RagdollRightLegRoot", "RagdollRightLeg", Vector3.new(0.5, -1.5, 0), Vector3.new(0, 0.5, 0)},
+ }
+ local folder = model:FindFirstChild("Constraints")
+ if not folder then folder = Instance.new("Folder"); folder.Name = "Constraints"; folder.Parent = model end
+ local repaired = 0
+ for _, spec in ipairs(limbs) do
+  local name, rootName, limbName, rootOffset, limbOffset = unpack(spec)
+  local limb = model:FindFirstChild(name)
+  if limb and limb:IsA("BasePart") then
+   local existing = folder:FindFirstChild(name)
+   local valid = existing and existing:IsA("BallSocketConstraint")
+    and existing.Enabled and existing.Attachment0 and existing.Attachment1
+    and existing.Attachment0:IsDescendantOf(torso)
+    and existing.Attachment1:IsDescendantOf(limb)
+   if not valid then
+    local rootAttachment = torso:FindFirstChild(rootName)
+    if not rootAttachment or not rootAttachment:IsA("Attachment") then
+     rootAttachment = Instance.new("Attachment")
+     rootAttachment.Name = rootName
+     -- Root offsets are joint locations in torso-local R6 space.
+     rootAttachment.Position = Vector3.new(rootOffset.X / (name == "Head" and 1 or 1.5),
+      name == "Head" and 1 or (name:find("Arm") and 0.5 or -1), 0)
+     rootAttachment.Parent = torso
+    end
+    local limbAttachment = limb:FindFirstChild(limbName)
+    if not limbAttachment or not limbAttachment:IsA("Attachment") then
+     limbAttachment = Instance.new("Attachment")
+     limbAttachment.Name = limbName
+     limbAttachment.Position = limbOffset
+     limbAttachment.Parent = limb
+    end
+    -- Put detached pieces back beside the torso BEFORE reconnecting them.
+    -- The joint's attachment CFrames then line up exactly.
+    limb.CFrame = torso.CFrame * rootAttachment.CFrame * limbAttachment.CFrame:Inverse()
+    limb.AssemblyLinearVelocity = torso.AssemblyLinearVelocity
+    limb.AssemblyAngularVelocity = torso.AssemblyAngularVelocity
+    if existing and existing:IsA("BallSocketConstraint") then
+     existing.Attachment0 = rootAttachment
+     existing.Attachment1 = limbAttachment
+     existing.Enabled = true
+    else
+     if existing then existing:Destroy() end
+     local joint = Instance.new("BallSocketConstraint")
+     joint.Name = name
+     joint.Attachment0 = rootAttachment
+     joint.Attachment1 = limbAttachment
+     joint.LimitsEnabled = true
+     joint.UpperAngle = name == "Head" and 40 or 90
+     joint.Parent = folder
+    end
+    repaired += 1
+   end
+  end
+ end
+ if repaired > 0 then print("[Portal] First-exit ragdoll repair:", model.Name, repaired, "joints restored") end
+end
+
 -- Permanent midair-only chains still START with a real floor entrance.
 -- After its first actual crossing, only airborne pairs are used.
 -- This intentionally reuses the same predictive ground entry and 2.5s
@@ -3245,6 +3317,7 @@ H.ProcessRagdoll = function(model)
     restore()
     if crossed and model.Parent and not flow.finalizing then
      H.PlayPortalSound(C.AUDIO.Enter, second)
+     H.RepairDismemberedOnFirstExit(model,flow)
      if rainbowAfterAir then H.StartRainbowRagdoll(model) end
      completedHops += 1
      flow.lastTeleportAt = os.clock()
@@ -3365,6 +3438,7 @@ H.ProcessRagdoll = function(model)
     task.spawn(H.ClosePortal,airFirst,nil)
     task.spawn(H.ClosePortal,airSecond,nil)
     if reached then
+     H.RepairDismemberedOnFirstExit(model,flow)
      exit,stopExit,exitPos,exitNormal=H.SpawnExit(model,H.GetBodyPart(model) or body,originalGroundY)
     else
      task.spawn(H.ClosePortal,entrance,function() if stopEntrance then stopEntrance() end end)
@@ -3393,6 +3467,7 @@ H.ProcessRagdoll = function(model)
     local restore=H.DisableCollision(model)
     local pivot=model:GetPivot()
     model:PivotTo(CFrame.new(exitPos+exitNormal*3)*(pivot-pivot.Position))
+    H.RepairDismemberedOnFirstExit(model,flow)
     -- Keep ragdoll spin and relative limb velocities. Only reorient the bulk
     -- exit momentum and add a fresh randomized kick; no fixed trajectory.
     local torso = H.GetBodyPart(model)
