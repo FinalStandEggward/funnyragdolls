@@ -57,7 +57,9 @@ C.EXIT_CANDIDATE_ATTEMPTS = portalSetting("EXIT_CANDIDATE_ATTEMPTS", 16)
 C.CAMERA_AWARE_EXITS = portalSetting("CAMERA_AWARE_EXITS", true)
 C.CAMERA_VIEW_MARGIN = portalSetting("CAMERA_VIEW_MARGIN", 0.14) -- reserve 14% of screen edges
 C.CAMERA_MAX_EXIT_DISTANCE = portalSetting("CAMERA_MAX_EXIT_DISTANCE", 90) -- studs from camera
-C.CAMERA_VISIBLE_ATTEMPTS = portalSetting("CAMERA_VISIBLE_ATTEMPTS", 50)
+C.CAMERA_VISIBLE_ATTEMPTS = portalSetting("CAMERA_VISIBLE_ATTEMPTS", 80)
+C.CAMERA_MIN_EXIT_DISTANCE = portalSetting("CAMERA_MIN_EXIT_DISTANCE", 18) -- avoid portals beside the camera/player
+C.CAMERA_IDEAL_EXIT_DISTANCE = portalSetting("CAMERA_IDEAL_EXIT_DISTANCE", 40) -- preferred camera-to-portal distance
 C.CAMERA_RAY_LENGTH = portalSetting("CAMERA_RAY_LENGTH", 140)
 -- Chain duplication and clone cleanup
 -- Experimental airborne portal-to-portal ballistic transfer
@@ -1142,11 +1144,14 @@ function H.CameraVisibleExit(model, body, minimumY)
   if hit and hit.Instance and hit.Instance:IsA("BasePart") and hit.Position.Y >= minimumY then
    local distanceToBody = (hit.Position-body.Position).Magnitude
    local distanceToCamera = (hit.Position-camera.CFrame.Position).Magnitude
-   -- Keep exits near enough to the ragdoll to preserve the recursive sequence.
-   if distanceToBody <= C.EXIT_SEARCH_RADIUS * 2.5 and distanceToCamera <= C.CAMERA_MAX_EXIT_DISTANCE then
-    -- Prefer nearby visible surfaces, with a slight preference for screen center.
+   -- Camera-centered exits: prioritize visible surfaces in the scene rather than
+   -- the nearest surface to the ragdoll/player. Keep a generous travel limit.
+   if distanceToBody <= C.CAMERA_MAX_EXIT_DISTANCE * 1.5
+    and distanceToCamera >= C.CAMERA_MIN_EXIT_DISTANCE
+    and distanceToCamera <= C.CAMERA_MAX_EXIT_DISTANCE then
     local centerPenalty = ((x/viewport.X-0.5)^2+(y/viewport.Y-0.5)^2)*12
-    local score = distanceToBody + centerPenalty
+    local score = math.abs(distanceToCamera-C.CAMERA_IDEAL_EXIT_DISTANCE)
+     + centerPenalty + distanceToBody*0.035
     if not bestScore or score < bestScore then
      bestHit, bestScore = hit, score
     end
@@ -2662,6 +2667,13 @@ function H.EmitPrimeBombDeathAura(model)
     if emitter:IsA("ParticleEmitter") then
      local copy = emitter:Clone()
      copy.Enabled = false
+     -- Tint all three death-aura textures with the PrimeBomb's magenta/pink
+     -- palette while preserving their textures, sizes and lifetimes.
+     copy.Color = ColorSequence.new({
+      ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 120, 215)),
+      ColorSequenceKeypoint.new(0.55, C.BOMB_VISUAL_COLOR),
+      ColorSequenceKeypoint.new(1, Color3.fromRGB(210, 65, 245))
+     })
      copy.Parent = origin
      -- Unlike the explosion, the death effect is a short-lived flame aura.
      -- Keep all three emitters running on every limb for a visible duration.
