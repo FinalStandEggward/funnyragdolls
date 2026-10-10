@@ -3145,70 +3145,85 @@ end
 C.REPAIR_ON_FIRST_EXIT = portalSetting("REPAIR_ON_FIRST_EXIT", true)
 function H.RepairDismemberedOnFirstExit(model, flow)
  if not C.REPAIR_ON_FIRST_EXIT or flow.firstExitRepairDone then return end
- flow.firstExitRepairDone = true
  if not model or not model.Parent then return end
  local torso = model:FindFirstChild("Torso")
- if not torso or not torso:IsA("BasePart") then return end
- local limbs = {
-  {"Head", "RagdollNeckRoot", "RagdollNeck", Vector3.new(0, 1.5, 0), Vector3.new(0, -0.5, 0)},
-  {"Left Arm", "RagdollLeftArmRoot", "RagdollLeftArm", Vector3.new(-1.5, 0.5, 0), Vector3.new(0.5, 0.5, 0)},
-  {"Right Arm", "RagdollRightArmRoot", "RagdollRightArm", Vector3.new(1.5, 0.5, 0), Vector3.new(-0.5, 0.5, 0)},
-  {"Left Leg", "RagdollLeftLegRoot", "RagdollLeftLeg", Vector3.new(-0.5, -1.5, 0), Vector3.new(0, 0.5, 0)},
-  {"Right Leg", "RagdollRightLegRoot", "RagdollRightLeg", Vector3.new(0.5, -1.5, 0), Vector3.new(0, 0.5, 0)},
+ if not (torso and torso:IsA("BasePart")) then return end
+
+ -- ragdoll.rbxmx uses Attachment0 on EACH limb, Attachment1 on the torso,
+ -- with BallSocketConstraints parented to limbs, not a "Constraints" folder.
+ -- Existing joints can be valid but their detached limbs can be hundreds of
+ -- studs away: reposition those limbs even when their sockets already exist.
+ local layout = {
+  {"Head", Vector3.new(0,1,0), Vector3.new(0,-0.5,0)},
+  {"Left Arm", Vector3.new(-1,0.5,0), Vector3.new(0.5,0.5,0)},
+  {"Right Arm", Vector3.new(1,0.5,0), Vector3.new(-0.5,0.5,0)},
+  {"Left Leg", Vector3.new(-0.5,-1,0), Vector3.new(0,0.5,0)},
+  {"Right Leg", Vector3.new(0.5,-1,0), Vector3.new(0,0.5,0)}
  }
- local folder = model:FindFirstChild("Constraints")
- if not folder then folder = Instance.new("Folder"); folder.Name = "Constraints"; folder.Parent = model end
- local repaired = 0
- for _, spec in ipairs(limbs) do
-  local name, rootName, limbName, rootOffset, limbOffset = unpack(spec)
+ local restored = 0
+ for _, entry in ipairs(layout) do
+  local name, torsoOffset, limbOffset = entry[1],entry[2],entry[3]
   local limb = model:FindFirstChild(name)
   if limb and limb:IsA("BasePart") then
-   local existing = folder:FindFirstChild(name)
-   local valid = existing and existing:IsA("BallSocketConstraint")
-    and existing.Enabled and existing.Attachment0 and existing.Attachment1
-    and existing.Attachment0:IsDescendantOf(torso)
-    and existing.Attachment1:IsDescendantOf(limb)
-   if not valid then
-    local rootAttachment = torso:FindFirstChild(rootName)
-    if not rootAttachment or not rootAttachment:IsA("Attachment") then
-     rootAttachment = Instance.new("Attachment")
-     rootAttachment.Name = rootName
-     -- Root offsets are joint locations in torso-local R6 space.
-     rootAttachment.Position = Vector3.new(rootOffset.X / (name == "Head" and 1 or 1.5),
-      name == "Head" and 1 or (name:find("Arm") and 0.5 or -1), 0)
-     rootAttachment.Parent = torso
+   local joint
+   for _, candidate in ipairs(model:GetDescendants()) do
+    if candidate:IsA("BallSocketConstraint") then
+     local a,b = candidate.Attachment0,candidate.Attachment1
+     if (a and a.Parent == limb) or (b and b.Parent == limb) then
+      joint = candidate
+      break
+     end
     end
-    local limbAttachment = limb:FindFirstChild(limbName)
-    if not limbAttachment or not limbAttachment:IsA("Attachment") then
-     limbAttachment = Instance.new("Attachment")
-     limbAttachment.Name = limbName
-     limbAttachment.Position = limbOffset
-     limbAttachment.Parent = limb
-    end
-    -- Put detached pieces back beside the torso BEFORE reconnecting them.
-    -- The joint's attachment CFrames then line up exactly.
-    limb.CFrame = torso.CFrame * rootAttachment.CFrame * limbAttachment.CFrame:Inverse()
-    limb.AssemblyLinearVelocity = torso.AssemblyLinearVelocity
-    limb.AssemblyAngularVelocity = torso.AssemblyAngularVelocity
-    if existing and existing:IsA("BallSocketConstraint") then
-     existing.Attachment0 = rootAttachment
-     existing.Attachment1 = limbAttachment
-     existing.Enabled = true
-    else
-     if existing then existing:Destroy() end
-     local joint = Instance.new("BallSocketConstraint")
-     joint.Name = name
-     joint.Attachment0 = rootAttachment
-     joint.Attachment1 = limbAttachment
-     joint.LimitsEnabled = true
-     joint.UpperAngle = name == "Head" and 40 or 90
-     joint.Parent = folder
-    end
-    repaired += 1
    end
+   local limbAttachment = joint and ((joint.Attachment0 and joint.Attachment0.Parent == limb and joint.Attachment0)
+    or (joint.Attachment1 and joint.Attachment1.Parent == limb and joint.Attachment1))
+   local torsoAttachment = joint and ((joint.Attachment0 and joint.Attachment0.Parent == torso and joint.Attachment0)
+    or (joint.Attachment1 and joint.Attachment1.Parent == torso and joint.Attachment1))
+   if not limbAttachment then
+    limbAttachment = limb:FindFirstChild("PortalRepairLimb")
+    if not limbAttachment then
+     limbAttachment=Instance.new("Attachment")
+     limbAttachment.Name="PortalRepairLimb"
+     limbAttachment.Position=limbOffset
+     limbAttachment.Parent=limb
+    end
+   end
+   if not torsoAttachment then
+    torsoAttachment = torso:FindFirstChild("PortalRepair_"..name)
+    if not torsoAttachment then
+     torsoAttachment=Instance.new("Attachment")
+     torsoAttachment.Name="PortalRepair_"..name
+     torsoAttachment.Position=torsoOffset
+     torsoAttachment.Parent=torso
+    end
+   end
+   -- Snap the limb's attachment to the torso's attachment, including rotation.
+   limb.CFrame = torso.CFrame * torsoAttachment.CFrame * limbAttachment.CFrame:Inverse()
+   limb.AssemblyLinearVelocity=torso.AssemblyLinearVelocity
+   limb.AssemblyAngularVelocity=torso.AssemblyAngularVelocity
+   if name=="Head" then
+    -- The reference uses a Snap for the head; a ball socket keeps it floppy.
+    for _, child in ipairs(limb:GetChildren()) do
+     if child:IsA("Snap") and child.Part0 and child.Part1 then
+      child:Destroy()
+     end
+    end
+   end
+   if not joint then
+    joint=Instance.new("BallSocketConstraint")
+    joint.Name="PortalRepairSocket"
+    joint.Parent=limb
+   end
+   joint.Attachment0=limbAttachment
+   joint.Attachment1=torsoAttachment
+   joint.Enabled=true
+   joint.LimitsEnabled=true
+   joint.UpperAngle=name=="Head" and 40 or 90
+   restored += 1
   end
  end
- if repaired > 0 then print("[Portal] First-exit ragdoll repair:", model.Name, repaired, "joints restored") end
+ flow.firstExitRepairDone=true
+ print("[Portal] Reassembled on first exit:",model.Name,restored,"limbs")
 end
 
 -- Permanent midair-only chains still START with a real floor entrance.
